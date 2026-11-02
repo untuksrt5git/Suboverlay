@@ -24,6 +24,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private var lastPositionChangeAt = 0L
     private var lastPositionObservedAt = 0L
     private var lastKnownPlaying = false
+    private var lastEstimatedUpdateAt = 0L
     private var screenshotInProgress = false
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -145,14 +146,19 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 // UC often replaces its seekbar node with VideoView7/VideoView8 in fullscreen.
                 // Keep the last valid time and extrapolate only while the last known state is PLAY.
                 if (lastPosition >= 0L && lastPositionObservedAt > 0L) {
-                    val estimated = if (lastKnownPlaying) {
-                        lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L)
-                    } else lastPosition
-                    SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying)
-                    SubtitleOverlayService.updateAccessibilityDiagnostic(
-                        packageName + " · seekbar tersembunyi · estimasi: " + (estimated / 1000) + "s · " +
-                            if (lastKnownPlaying) "PLAY" else "PAUSE"
-                    )
+                    // Accessibility events can arrive many times per second. Throttle fallback
+                    // updates so the overlay clock is not hammered while UC hides its seekbar.
+                    if (now - lastEstimatedUpdateAt >= ESTIMATED_UPDATE_INTERVAL_MS) {
+                        lastEstimatedUpdateAt = now
+                        val estimated = if (lastKnownPlaying) {
+                            lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L)
+                        } else lastPosition
+                        SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying)
+                        SubtitleOverlayService.updateAccessibilityDiagnostic(
+                            packageName + " · seekbar tersembunyi · estimasi: " + (estimated / 1000) + "s · " +
+                                if (lastKnownPlaying) "PLAY" else "PAUSE"
+                        )
+                    }
                     return
                 }
             }
@@ -314,6 +320,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val POLL_INTERVAL_MS = 1_000L
+        private const val ESTIMATED_UPDATE_INTERVAL_MS = 1_000L
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
