@@ -102,7 +102,7 @@ class SubtitleOverlayService : Service() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     params.x = startX + (event.rawX - downX).toInt()
-                    params.y = startY + (event.rawY - downY).toInt()
+                    params.y = startY - (event.rawY - downY).toInt()
                     try { windowManager.updateViewLayout(root, params) } catch (_: Exception) { }
                     true
                 }
