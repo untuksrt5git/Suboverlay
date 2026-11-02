@@ -75,35 +75,52 @@ class SubtitleOverlayService : Service() {
             this.text = "Suboverlay siap"
         }
         subtitleView = text
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+
+        fun makeControlRow(): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         }
-        fun addControl(label: String, action: () -> Unit) {
-            controls.addView(Button(this).apply {
-                this.text = label; textSize = 11f
+        fun addControl(row: LinearLayout, label: String, action: () -> Unit) {
+            row.addView(Button(this).apply {
+                this.text = label
+                textSize = 11f
+                minWidth = 0
+                setPadding(2, 0, 2, 0)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 setOnClickListener { action() }
             })
         }
-        addControl("Mulai") {
+
+        val playbackControls = makeControlRow()
+        addControl(playbackControls, "Mulai") {
             if (!fallbackRunning) {
                 fallbackStartedAtMs = SystemClock.elapsedRealtime() - manualPositionMs
                 fallbackRunning = true
             }
         }
-        addControl("Jeda") {
+        addControl(playbackControls, "Jeda") {
             if (fallbackRunning) {
                 manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
                 fallbackRunning = false
                 renderSubtitle()
             }
         }
-        addControl("−5s") { manualOffsetMs -= 5_000; renderSubtitle() }
-        addControl("+5s") { manualOffsetMs += 5_000; renderSubtitle() }
-        addControl("Tutup") { stopOverlay(); stopSelf() }
+
+        val adjustmentControls = makeControlRow()
+        addControl(adjustmentControls, "−5s") { manualOffsetMs -= 5_000; renderSubtitle() }
+        addControl(adjustmentControls, "+5s") { manualOffsetMs += 5_000; renderSubtitle() }
+        addControl(adjustmentControls, "Tutup") { stopOverlay(); stopSelf() }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xCC111111.toInt())
-            addView(text); addView(controls)
+            addView(text)
+            addView(playbackControls)
+            addView(adjustmentControls)
         }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
