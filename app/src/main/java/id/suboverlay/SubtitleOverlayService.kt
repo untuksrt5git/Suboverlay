@@ -16,7 +16,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -28,6 +27,8 @@ class SubtitleOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     init { currentInstance = this }
     private var overlay: LinearLayout? = null
+    private var controlPanel: LinearLayout? = null
+    private var controlHandle: Button? = null
     private var subtitleView: TextView? = null
     private var syncStatusView: TextView? = null
     private var cues: List<SubtitleCue> = emptyList()
@@ -38,9 +39,6 @@ class SubtitleOverlayService : Service() {
     private var accessibilityPositionMs = -1L
     private var accessibilityUpdatedAtMs = 0L
     private var accessibilityPlaying = false
-    private var webViewPositionMs = -1L
-    private var webViewUpdatedAtMs = 0L
-    private var webViewPlaying = false
     private var accessibilityDiagnostic = "menunggu data browser"
     private var subtitleTextSizeSp = 19f
     private var overlayBackgroundAlpha = 204
@@ -81,107 +79,120 @@ class SubtitleOverlayService : Service() {
     private fun showOverlay() {
         if (overlay != null) return
         val text = TextView(this).apply {
-            setTextColor(Color.WHITE); textSize = 19f; gravity = Gravity.CENTER
-            setPadding(18, 10, 18, 10); setBackgroundColor(0xCC111111.toInt())
+            setTextColor(Color.WHITE)
+            textSize = subtitleTextSizeSp
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            setBackgroundColor(Color.TRANSPARENT)
             this.text = "Suboverlay siap"
         }
         subtitleView = text
         syncStatusView = TextView(this).apply {
-            setTextColor(0xFFBDBDBD.toInt()); textSize = 10f; gravity = Gravity.CENTER
-            setPadding(8, 2, 8, 4); this.text = "Memeriksa sesi video…"
-        }
-
-        fun makeControlRow(): LinearLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+            setTextColor(0xFFBDBDBD.toInt())
+            textSize = 10f
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            this.text = "Menunggu posisi video"
         }
-        fun addControl(row: LinearLayout, label: String, action: () -> Unit) {
-            row.addView(Button(this).apply {
-                this.text = label; textSize = 11f; minWidth = 0; setPadding(2, 0, 2, 0)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                setOnClickListener { action() }
-            })
-        }
-
-        val playbackControls = makeControlRow()
-        addControl(playbackControls, "Mulai") {
-            if (!fallbackRunning) {
-                fallbackStartedAtMs = SystemClock.elapsedRealtime() - manualPositionMs
-                fallbackRunning = true
-                updateSyncStatus("Jam manual berjalan (tidak mengikuti video)")
-            }
-        }
-        addControl(playbackControls, "Jeda") {
-            if (fallbackRunning) {
-                manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
-                fallbackRunning = false
-                updateSyncStatus("Jam manual dijeda")
-                renderSubtitle()
-            }
-        }
-
-        val adjustmentControls = makeControlRow()
-        addControl(adjustmentControls, "−5s") { manualOffsetMs -= 5_000; renderSubtitle() }
-        addControl(adjustmentControls, "+5s") { manualOffsetMs += 5_000; renderSubtitle() }
-        addControl(adjustmentControls, "Tutup") { stopOverlay(); stopSelf() }
-
-        val appearanceControls = makeControlRow()
-        addControl(appearanceControls, "A−") { adjustTextSize(-2f) }
-        addControl(appearanceControls, "A+") { adjustTextSize(2f) }
-        addControl(appearanceControls, "Op−") { adjustBackgroundAlpha(-20) }
-        addControl(appearanceControls, "Op+") { adjustBackgroundAlpha(20) }
-
-        val fineSyncControls = makeControlRow()
-        addControl(fineSyncControls, "Sync −0.5s") { manualOffsetMs -= 500; renderSubtitle() }
-        addControl(fineSyncControls, "Sync +0.5s") { manualOffsetMs += 500; renderSubtitle() }
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb(overlayBackgroundAlpha, 17, 17, 17))
-            addView(text); addView(syncStatusView); addView(playbackControls)
-            addView(adjustmentControls); addView(appearanceControls); addView(fineSyncControls)
+            gravity = Gravity.CENTER
+            addView(text)
+            addView(syncStatusView)
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+        val subtitleParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; y = dp(70) }
+
+        try {
+            windowManager.addView(root, subtitleParams)
+            overlay = root
+            createControlHandle()
+            renderSubtitle()
+        } catch (_: SecurityException) {
+            stopSelf()
+        }
+    }
+
+    private fun createControlHandle() {
+        val handle = Button(this).apply {
+            text = "⚙"
+            textSize = 16f
+            minWidth = 0
+            setPadding(0, 0, 0, 0)
+            setOnClickListener { toggleControlPanel() }
         }
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            dp(42), dp(42),
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; y = 90 }
-        var downX = 0f
-        var downY = 0f
-        var startX = 0
-        var startY = 0
-        text.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY; startX = params.x; startY = params.y; true }
-                MotionEvent.ACTION_MOVE -> {
-                    params.x = startX + (event.rawX - downX).toInt()
-                    params.y = startY - (event.rawY - downY).toInt()
-                    try { windowManager.updateViewLayout(root, params) } catch (_: Exception) { }
-                    true
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> true
-                else -> false
-            }
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(8); y = dp(100) }
+        windowManager.addView(handle, params)
+        controlHandle = handle
+    }
+
+    private fun toggleControlPanel() {
+        controlPanel?.let {
+            try { windowManager.removeView(it) } catch (_: Exception) { }
+            controlPanel = null
+            controlHandle?.text = "⚙"
+            return
         }
-        try {
-            windowManager.addView(root, params)
-            overlay = root
-            renderSubtitle()
-        } catch (_: SecurityException) { stopSelf() }
+        fun row(): LinearLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun addControl(parent: LinearLayout, label: String, action: () -> Unit) {
+            parent.addView(Button(this).apply {
+                text = label
+                textSize = 11f
+                minWidth = 0
+                setPadding(dp(4), 0, dp(4), 0)
+                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
+                setOnClickListener { action() }
+            })
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            setBackgroundColor(0xEE111111.toInt())
+        }
+        val sync = row()
+        addControl(sync, "−5s") { manualOffsetMs -= 5_000; renderSubtitle() }
+        addControl(sync, "+5s") { manualOffsetMs += 5_000; renderSubtitle() }
+        addControl(sync, "−0.5s") { manualOffsetMs -= 500; renderSubtitle() }
+        addControl(sync, "+0.5s") { manualOffsetMs += 500; renderSubtitle() }
+        val appearance = row()
+        addControl(appearance, "A−") { adjustTextSize(-2f) }
+        addControl(appearance, "A+") { adjustTextSize(2f) }
+        addControl(appearance, "Op−") { adjustBackgroundAlpha(-20) }
+        addControl(appearance, "Op+") { adjustBackgroundAlpha(20) }
+        val actions = row()
+        addControl(actions, "Tutup panel") { toggleControlPanel() }
+        addControl(actions, "Matikan") { stopOverlay(); stopSelf() }
+        panel.addView(sync)
+        panel.addView(appearance)
+        panel.addView(actions)
+        val params = WindowManager.LayoutParams(
+            dp(300), WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(8); y = dp(150) }
+        windowManager.addView(panel, params)
+        controlPanel = panel
+        controlHandle?.text = "×"
     }
 
     private fun syncFromMediaSession() {
         try {
-            val webFresh = webViewPositionMs >= 0L && SystemClock.elapsedRealtime() - webViewUpdatedAtMs < WEBVIEW_FRESH_MS
-            if (webFresh) {
-                val now = SystemClock.elapsedRealtime()
-                manualPositionMs = webViewPositionMs + if (webViewPlaying) (now - webViewUpdatedAtMs).coerceAtLeast(0L) else 0L
-                updateSyncStatus("Browser WebView · ${if (webViewPlaying) "PLAY" else "PAUSE"} · ${manualPositionMs / 1000}s")
-                renderSubtitle()
-                return
-            }
             val manager = getSystemService(MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
             val sessions = manager.getActiveSessions(ComponentName(this, SessionAccessService::class.java))
             val candidates = sessions.mapNotNull { controller ->
@@ -223,6 +234,8 @@ class SubtitleOverlayService : Service() {
         }
     }
 
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
     private fun adjustTextSize(deltaSp: Float) {
         subtitleTextSizeSp = (subtitleTextSizeSp + deltaSp).coerceIn(12f, 40f)
         subtitleView?.textSize = subtitleTextSizeSp
@@ -231,8 +244,7 @@ class SubtitleOverlayService : Service() {
     private fun adjustBackgroundAlpha(delta: Int) {
         overlayBackgroundAlpha = (overlayBackgroundAlpha + delta).coerceIn(60, 255)
         val color = Color.argb(overlayBackgroundAlpha, 17, 17, 17)
-        overlay?.setBackgroundColor(color)
-        subtitleView?.setBackgroundColor(color)
+        subtitleView?.setBackgroundColor(Color.TRANSPARENT)
     }
 
     private fun updateSyncStatus(message: String) {
@@ -245,6 +257,10 @@ class SubtitleOverlayService : Service() {
     }
 
     private fun stopOverlay() {
+        controlPanel?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        controlPanel = null
+        controlHandle?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+        controlHandle = null
         overlay?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         overlay = null; subtitleView = null; syncStatusView = null
     }
@@ -266,18 +282,9 @@ class SubtitleOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private const val WEBVIEW_FRESH_MS = 1_500L
         private const val ACCESSIBILITY_FRESH_MS = 2_000L
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
-
-        fun updateWebViewPosition(positionMs: Long, playing: Boolean) {
-            currentInstance?.let { service ->
-                service.webViewPositionMs = positionMs
-                service.webViewUpdatedAtMs = SystemClock.elapsedRealtime()
-                service.webViewPlaying = playing
-            }
-        }
 
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
