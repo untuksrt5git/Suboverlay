@@ -141,6 +141,11 @@ class SubtitleAccessibilityService : AccessibilityService() {
         observedAtMs: Long = SystemClock.elapsedRealtime()
     ) {
         val now = SystemClock.elapsedRealtime()
+        // OCR runs asynchronously. A screenshot captured before a newer
+        // Accessibility reading can finish later; never let that older frame
+        // overwrite the newer playback position (especially after rapid seeks).
+        if (lastPositionObservedAt > 0L && observedAtMs < lastPositionObservedAt) return
+
         if (lastPosition < 0L) {
             lastPosition = positionMs
             lastPositionObservedAt = observedAtMs
