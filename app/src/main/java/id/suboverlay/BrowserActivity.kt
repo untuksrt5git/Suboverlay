@@ -25,7 +25,7 @@ class BrowserActivity : Activity() {
         override fun run() {
             if (!polling || !::webView.isInitialized) return
             webView.evaluateJavascript(
-                "(function(){var v=document.querySelector('video');return v?JSON.stringify({time:v.currentTime,playing:!v.paused&&!v.ended}):''})()"
+                "(function(){var videos=[];var frames=0;function scan(doc){try{frames++;var list=doc.querySelectorAll('video');for(var i=0;i<list.length;i++){var v=list[i];videos.push({time:v.currentTime,playing:!v.paused&&!v.ended,ready:v.readyState,width:v.videoWidth,height:v.videoHeight});}var fs=doc.querySelectorAll('iframe,frame');for(var j=0;j<fs.length;j++){try{if(fs[j].contentDocument)scan(fs[j].contentDocument);}catch(e){}}}catch(e){}}scan(document);videos.sort(function(a,b){return (b.width*b.height)-(a.width*a.height)||b.ready-a.ready;});return JSON.stringify({videoCount:videos.length,frames:frames,best:videos.length?videos[0]:null});})()"
             ) { result ->
                 try {
                     val raw = if (result == null || result == "null") "" else org.json.JSONTokener(result).nextValue() as? String ?: ""
