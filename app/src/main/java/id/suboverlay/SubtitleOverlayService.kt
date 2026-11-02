@@ -110,7 +110,7 @@ class SubtitleOverlayService : Service() {
             addView(syncStatusView)
             setBackgroundColor(Color.TRANSPARENT)
         }
-        val subtitleParams = WindowManager.LayoutParams(
+        val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
@@ -123,11 +123,11 @@ class SubtitleOverlayService : Service() {
             x = overlayPrefs.getInt("x", 0)
             y = overlayPrefs.getInt("y", dp(70))
         }
-        subtitleParams = subtitleParams
+        subtitleParams = layoutParams
         root.setOnTouchListener { _, event -> handleOverlayTouch(event) }
 
         try {
-            windowManager.addView(root, subtitleParams)
+            windowManager.addView(root, layoutParams)
             overlay = root
             createControlHandle()
             renderSubtitle()
