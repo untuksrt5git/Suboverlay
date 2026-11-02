@@ -5,11 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.ComponentName
+import android.media.session.PlaybackState
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -25,12 +30,16 @@ class SubtitleOverlayService : Service() {
     private var subtitleView: TextView? = null
     private var cues: List<SubtitleCue> = emptyList()
     private var manualPositionMs = 0L
+    private var manualOffsetMs = 0L
+    private val handler = Handler(Looper.getMainLooper())
+    private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        handler.post(syncTask)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -50,6 +59,7 @@ class SubtitleOverlayService : Service() {
         }.orEmpty()
         cues = SrtParser.parse(content)
         manualPositionMs = 0L
+        manualOffsetMs = 0L
         renderSubtitle()
     }
 
@@ -70,8 +80,8 @@ class SubtitleOverlayService : Service() {
                 setOnClickListener { action() }
             })
         }
-        addControl("−5s") { manualPositionMs = (manualPositionMs - 5_000).coerceAtLeast(0); renderSubtitle() }
-        addControl("+5s") { manualPositionMs += 5_000; renderSubtitle() }
+        addControl("−5s") { manualOffsetMs -= 5_000; renderSubtitle() }
+        addControl("+5s") { manualOffsetMs += 5_000; renderSubtitle() }
         addControl("Tutup") { stopOverlay(); stopSelf() }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -117,8 +127,23 @@ class SubtitleOverlayService : Service() {
         } catch (_: SecurityException) { stopSelf() }
     }
 
+    private fun syncFromMediaSession() {
+        try {
+            val manager = getSystemService(MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
+            val sessions = manager.getActiveSessions(ComponentName(this, SessionAccessService::class.java))
+            val state = sessions.firstNotNullOfOrNull { it.playbackState }
+            if (state != null && state.position >= 0L &&
+                (state.state == PlaybackState.STATE_PLAYING || state.state == PlaybackState.STATE_PAUSED)) {
+                val elapsed = if (state.state == PlaybackState.STATE_PLAYING)
+                    (SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
+                manualPositionMs = state.position + elapsed
+                renderSubtitle()
+            }
+        } catch (_: Exception) { }
+    }
+
     private fun renderSubtitle() {
-        val cue = SrtParser.at(cues, manualPositionMs.coerceAtLeast(0))
+        val cue = SrtParser.at(cues, (manualPositionMs + manualOffsetMs).coerceAtLeast(0))
         subtitleView?.text = cue?.text ?: if (cues.isEmpty()) "File subtitle kosong/tidak terbaca" else "—"
     }
 
@@ -143,7 +168,7 @@ class SubtitleOverlayService : Service() {
             .setSmallIcon(android.R.drawable.ic_media_play).setOngoing(true).build()
     }
 
-    override fun onDestroy() { stopOverlay(); super.onDestroy() }
+    override fun onDestroy() { handler.removeCallbacks(syncTask); stopOverlay(); super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
