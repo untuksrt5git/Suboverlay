@@ -3,6 +3,7 @@ package id.suboverlay
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -16,6 +17,7 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
     private val pickSubtitle = 1001
+    private lateinit var syncButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,13 +34,17 @@ class MainActivity : Activity() {
             textSize = 16f; gravity = Gravity.CENTER
             setPadding(0, 12, 0, 24)
         })
-        layout.addView(Button(this).apply {
-            text = "Aktifkan sinkronisasi video"
+        syncButton = Button(this).apply {
             setOnClickListener {
-                Toast.makeText(this@MainActivity, "Aktifkan akses notifikasi Suboverlay untuk membaca sesi media Android.", Toast.LENGTH_LONG).show()
-                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                if (isNotificationListenerEnabled()) {
+                    Toast.makeText(this@MainActivity, "Akses sinkronisasi sudah aktif.", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Aktifkan akses notifikasi Suboverlay untuk membaca sesi media Android.", Toast.LENGTH_LONG).show()
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
             }
-        })
+        }
+        layout.addView(syncButton)
         layout.addView(Button(this).apply {
             text = "Pilih file subtitle (.srt)"
             setOnClickListener {
@@ -71,12 +77,21 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (::syncButton.isInitialized) {
+            syncButton.text = if (isNotificationListenerEnabled()) "Sinkronisasi video: AKTIF" else "Aktifkan sinkronisasi video"
+        }
         pendingUri?.let {
             if (Settings.canDrawOverlays(this)) {
                 startOverlay(it)
                 pendingUri = null
             }
         }
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
+        val target = ComponentName(this, SessionAccessService::class.java)
+        return enabled.split(":").any { ComponentName.unflattenFromString(it) == target }
     }
 
     private fun startOverlay(uri: Uri) {
