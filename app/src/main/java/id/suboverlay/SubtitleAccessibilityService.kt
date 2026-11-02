@@ -25,6 +25,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private var lastPositionObservedAt = 0L
     private var lastKnownPlaying = false
     private var lastPlaybackDirection = 1L
+    // Temporarily stop extrapolating after a detected forward/backward seek.
+    private var justSeekedUntil = 0L
     private var screenshotInProgress = false
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -145,26 +147,34 @@ class SubtitleAccessibilityService : AccessibilityService() {
             lastPositionChangeAt = now
             return
         }
+
         val delta = positionMs - lastPosition
-        // OCR reads whole-second labels, which can wobble by 1 second between
-        // frames. Ignore small backwards readings instead of making the
-        // estimated clock run backwards.
-        if (delta < -OCR_BACKWARD_NOISE_MS) {
-            // A genuine seek-back changes the anchor, but normal playback
-            // continues forward from that new position.
+
+        // A jump of 2 seconds or more in either direction is treated as a seek,
+        // not as normal playback or OCR drift. Re-anchor immediately and pause
+        // extrapolation briefly so the old playback clock cannot keep showing
+        // subtitles from the pre-seek position.
+        if (kotlin.math.abs(delta) >= SEEK_THRESHOLD_MS) {
             lastPosition = positionMs
             lastPositionObservedAt = observedAtMs
             lastPositionChangeAt = now
             lastKnownPlaying = true
             lastPlaybackDirection = 1L
-        } else if (delta >= POSITION_CHANGE_THRESHOLD_MS) {
+            justSeekedUntil = now + SEEK_COOLDOWN_MS
+            return
+        }
+
+        // Small negative changes are one-second OCR label wobble, not a seek.
+        if (delta < 0L) return
+
+        if (delta >= POSITION_CHANGE_THRESHOLD_MS) {
             lastPosition = positionMs
             // Anchor to screenshot capture time, not OCR completion time.
             lastPositionObservedAt = observedAtMs
             lastPositionChangeAt = now
             lastKnownPlaying = true
             lastPlaybackDirection = 1L
-        } else if (delta >= 0L && now - lastPositionChangeAt >= PLAYING_WINDOW_MS) {
+        } else if (now - lastPositionChangeAt >= PLAYING_WINDOW_MS) {
             lastKnownPlaying = false
             lastPosition = positionMs
             lastPositionObservedAt = now
@@ -178,13 +188,21 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private fun publishEstimatedPosition() {
         if (lastPosition < 0L) return
         val now = SystemClock.elapsedRealtime()
-        val estimated = if (lastKnownPlaying) {
-            (lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L) * lastPlaybackDirection).coerceAtLeast(0L)
-        } else {
-            lastPosition
+        val seekCooldownActive = now < justSeekedUntil
+        val estimated = when {
+            seekCooldownActive -> lastPosition
+            lastKnownPlaying -> (
+                lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L) * lastPlaybackDirection
+            ).coerceAtLeast(0L)
+            else -> lastPosition
         }
-        SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying)
-        if (lastKnownPlaying) {
+
+        // Send playing=false during the cooldown too; otherwise the overlay
+        // would add elapsed time again and defeat this short freeze.
+        SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying && !seekCooldownActive)
+        if (seekCooldownActive) {
+            SubtitleOverlayService.updateAccessibilityDiagnostic("Seek terdeteksi · posisi: ${estimated / 1000}s")
+        } else if (lastKnownPlaying) {
             SubtitleOverlayService.updateAccessibilityDiagnostic("Estimasi berjalan · posisi: ${estimated / 1000}s")
         }
     }
@@ -338,7 +356,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val POLL_INTERVAL_MS = 1_000L
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
-        private const val OCR_BACKWARD_NOISE_MS = 1_500L
+        private const val SEEK_THRESHOLD_MS = 2_000L
+        private const val SEEK_COOLDOWN_MS = 1_500L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
         private const val MIN_VIDEO_DURATION_MS = 10L * 60L * 1000L
         private const val MIN_DURATION_GAP_MS = 60L * 1000L
