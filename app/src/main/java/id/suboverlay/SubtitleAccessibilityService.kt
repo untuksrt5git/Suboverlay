@@ -22,6 +22,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastPosition = -1L
     private var lastPositionChangeAt = 0L
+    private var lastPositionObservedAt = 0L
+    private var lastKnownPlaying = false
     private var screenshotInProgress = false
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -75,8 +77,10 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                         if (lastPosition < 0L || kotlin.math.abs(elapsed - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
                                             lastPosition = elapsed
                                             lastPositionChangeAt = now
+                                            lastPositionObservedAt = now
+                                            lastKnownPlaying = true
                                         }
-                                        val playing = now - lastPositionChangeAt < PLAYING_WINDOW_MS
+                                        val playing = lastKnownPlaying
                                         SubtitleOverlayService.updateAccessibilityPosition(elapsed, playing)
                                         SubtitleOverlayService.updateAccessibilityDiagnostic(
                                             "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
@@ -120,17 +124,35 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 rangeCount += countRangeNodes(root, 0)
                 collectControlDiagnostics(root, 0, candidates)
                 // Prefer a real seekbar; some UC player versions expose only time labels.
+                val explicitPlaying = findPlaybackState(root, 0)
+                if (explicitPlaying != null) lastKnownPlaying = explicitPlaying
                 val position = findSeekPosition(root, 0).takeIf { it >= 0L }
                     ?: findPositionFromTimeLabels(root)
+                val now = SystemClock.elapsedRealtime()
                 if (position != null && position >= 0L) {
-                    val now = SystemClock.elapsedRealtime()
                     if (lastPosition < 0L || kotlin.math.abs(position - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
                         lastPosition = position
                         lastPositionChangeAt = now
+                        lastPositionObservedAt = now
+                        if (explicitPlaying == null) lastKnownPlaying = true
                     }
-                    val appearsPlaying = now - lastPositionChangeAt < PLAYING_WINDOW_MS
-                    SubtitleOverlayService.updateAccessibilityPosition(position, appearsPlaying)
+                    val playing = explicitPlaying ?: lastKnownPlaying
+                    SubtitleOverlayService.updateAccessibilityPosition(position, playing)
                     SubtitleOverlayService.updateAccessibilityDiagnostic(packageName + " · RangeInfo: " + rangeCount + " · posisi: " + (position / 1000) + "s")
+                    return
+                }
+
+                // UC often replaces its seekbar node with VideoView7/VideoView8 in fullscreen.
+                // Keep the last valid time and extrapolate only while the last known state is PLAY.
+                if (lastPosition >= 0L && lastPositionObservedAt > 0L) {
+                    val estimated = if (lastKnownPlaying) {
+                        lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L)
+                    } else lastPosition
+                    SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying)
+                    SubtitleOverlayService.updateAccessibilityDiagnostic(
+                        packageName + " · seekbar tersembunyi · estimasi: " + (estimated / 1000) + "s · " +
+                            if (lastKnownPlaying) "PLAY" else "PAUSE"
+                    )
                     return
                 }
             }
@@ -145,6 +167,24 @@ class SubtitleAccessibilityService : AccessibilityService() {
         } finally {
             roots.forEach { try { it.recycle() } catch (_: Exception) { } }
         }
+    }
+
+
+    /** Returns true for an exposed PLAY label and false for PAUSE; null if unavailable. */
+    private fun findPlaybackState(node: AccessibilityNodeInfo, depth: Int): Boolean? {
+        if (depth > MAX_DEPTH) return null
+        val text = (node.text?.toString().orEmpty() + " " +
+            node.contentDescription?.toString().orEmpty() + " " +
+            node.viewIdResourceName.orEmpty()).trim()
+        val normalized = text.uppercase().replace(Regex("[^A-Z]+"), " ").trim()
+        if (Regex("\\bPAUSE\\b").containsMatchIn(normalized)) return false
+        if (Regex("\\bPLAY\\b").containsMatchIn(normalized)) return true
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            val result = try { findPlaybackState(child, depth + 1) } finally { child.recycle() }
+            if (result != null) return result
+        }
+        return null
     }
 
     private fun countRangeNodes(node: AccessibilityNodeInfo, depth: Int): Int {
