@@ -38,6 +38,9 @@ class SubtitleOverlayService : Service() {
     private var accessibilityPositionMs = -1L
     private var accessibilityUpdatedAtMs = 0L
     private var accessibilityPlaying = false
+    private var webViewPositionMs = -1L
+    private var webViewUpdatedAtMs = 0L
+    private var webViewPlaying = false
     private var accessibilityDiagnostic = "menunggu data browser"
     private var subtitleTextSizeSp = 19f
     private var overlayBackgroundAlpha = 204
@@ -171,6 +174,14 @@ class SubtitleOverlayService : Service() {
 
     private fun syncFromMediaSession() {
         try {
+            val webFresh = webViewPositionMs >= 0L && SystemClock.elapsedRealtime() - webViewUpdatedAtMs < WEBVIEW_FRESH_MS
+            if (webFresh) {
+                val now = SystemClock.elapsedRealtime()
+                manualPositionMs = webViewPositionMs + if (webViewPlaying) (now - webViewUpdatedAtMs).coerceAtLeast(0L) else 0L
+                updateSyncStatus("Browser WebView · ${if (webViewPlaying) "PLAY" else "PAUSE"} · ${manualPositionMs / 1000}s")
+                renderSubtitle()
+                return
+            }
             val manager = getSystemService(MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
             val sessions = manager.getActiveSessions(ComponentName(this, SessionAccessService::class.java))
             val candidates = sessions.mapNotNull { controller ->
@@ -255,9 +266,18 @@ class SubtitleOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private const val WEBVIEW_FRESH_MS = 1_500L
         private const val ACCESSIBILITY_FRESH_MS = 2_000L
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
+
+        fun updateWebViewPosition(positionMs: Long, playing: Boolean) {
+            currentInstance?.let { service ->
+                service.webViewPositionMs = positionMs
+                service.webViewUpdatedAtMs = SystemClock.elapsedRealtime()
+                service.webViewPlaying = playing
+            }
+        }
 
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
