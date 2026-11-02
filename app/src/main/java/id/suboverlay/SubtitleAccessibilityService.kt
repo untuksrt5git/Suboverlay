@@ -40,9 +40,9 @@ class SubtitleAccessibilityService : AccessibilityService() {
         handler.post(poll)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        scanActiveWindow()
-    }
+    // Avoid scanning the UC Browser tree for every accessibility event.
+    // The scheduled poll below is the only source of tree scans.
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
 
     /** OCR fallback using Android's Accessibility screenshot API (Android 11+). */
@@ -111,14 +111,10 @@ class SubtitleAccessibilityService : AccessibilityService() {
             for (window in windows) window.root?.let { roots.add(it) }
             if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
             var seenPackage = ""
-            var rangeCount = 0
-            val candidates = linkedSetOf<String>()
             for (root in roots) {
                 val packageName = root.packageName?.toString().orEmpty()
                 if (!isUcBrowser(packageName)) continue
                 seenPackage = packageName
-                rangeCount += countRangeNodes(root, 0)
-                collectControlDiagnostics(root, 0, candidates)
                 // Prefer a real seekbar; some UC player versions expose only time labels.
                 val position = findSeekPosition(root, 0).takeIf { it >= 0L }
                     ?: findPositionFromTimeLabels(root)
@@ -130,61 +126,18 @@ class SubtitleAccessibilityService : AccessibilityService() {
                     }
                     val appearsPlaying = now - lastPositionChangeAt < PLAYING_WINDOW_MS
                     SubtitleOverlayService.updateAccessibilityPosition(position, appearsPlaying)
-                    SubtitleOverlayService.updateAccessibilityDiagnostic(packageName + " · RangeInfo: " + rangeCount + " · posisi: " + (position / 1000) + "s")
+                    SubtitleOverlayService.updateAccessibilityDiagnostic(packageName + " · posisi: " + (position / 1000) + "s")
                     return
                 }
             }
             val message = if (seenPackage.isNotBlank()) {
-                seenPackage + " · RangeInfo: " + rangeCount +
-                    " · kontrol: " + if (candidates.isEmpty()) "tidak diekspos" else candidates.joinToString(" | ") +
-                    " · waktu video belum terbaca"
+                seenPackage + " · waktu video belum terbaca"
             } else "Jendela UC Browser tidak terlihat · windows: " + roots.size
             SubtitleOverlayService.updateAccessibilityDiagnostic(message)
         } catch (_: Exception) {
             SubtitleOverlayService.updateAccessibilityDiagnostic("Gagal membaca pohon Accessibility")
         } finally {
             roots.forEach { try { it.recycle() } catch (_: Exception) { } }
-        }
-    }
-
-    private fun countRangeNodes(node: AccessibilityNodeInfo, depth: Int): Int {
-        if (depth > MAX_DEPTH) return 0
-        var count = if (node.rangeInfo != null) 1 else 0
-        for (index in 0 until node.childCount) {
-            val child = node.getChild(index) ?: continue
-            count += try { countRangeNodes(child, depth + 1) } finally { child.recycle() }
-        }
-        return count
-    }
-    /**
-     * UC may expose its floating-player controls as buttons/text descriptions rather than
-     * RangeInfo seekbars. Keep a small, UC-only sample to diagnose what Android exposes.
-     */
-    private fun collectControlDiagnostics(
-        node: AccessibilityNodeInfo,
-        depth: Int,
-        output: MutableSet<String>
-    ) {
-        if (depth > MAX_DEPTH || output.size >= MAX_DIAGNOSTIC_NODES) return
-        val className = node.className?.toString().orEmpty().substringAfterLast('.')
-        val text = node.text?.toString()?.trim().orEmpty()
-        val description = node.contentDescription?.toString()?.trim().orEmpty()
-        val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
-        val searchable = (text + " " + description + " " + viewId + " " + className).lowercase()
-        val looksRelevant = node.isClickable || node.isScrollable ||
-            listOf("seek", "progress", "play", "pause", "time", "duration", "video", "slider").any { searchable.contains(it) }
-        if (looksRelevant) {
-            val details = listOf(className, viewId, description.ifBlank { text })
-                .filter { it.isNotBlank() }
-                .joinToString(":")
-                .replace(Regex("\\s+"), " ")
-                .take(72)
-            if (details.isNotBlank()) output.add(details)
-        }
-        for (index in 0 until node.childCount) {
-            if (output.size >= MAX_DIAGNOSTIC_NODES) break
-            val child = node.getChild(index) ?: continue
-            try { collectControlDiagnostics(child, depth + 1, output) } finally { child.recycle() }
         }
     }
 
