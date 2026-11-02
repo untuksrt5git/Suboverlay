@@ -28,11 +28,13 @@ class SubtitleAccessibilityService : AccessibilityService() {
     // Temporarily stop extrapolating after a detected forward/backward seek.
     private var justSeekedUntil = 0L
     private var screenshotInProgress = false
+    private var lastOrientationLabel = ""
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     private val poll = object : Runnable {
         override fun run() {
+            reportOrientationIfChanged()
             scanActiveWindow()
             if (android.os.Build.VERSION.SDK_INT >= 30) captureScreenForTime()
             publishEstimatedPosition()
@@ -108,7 +110,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                 if (duration != null && elapsed != null) {
                                     recordPosition(elapsed, screenshotCapturedAt)
                                     SubtitleOverlayService.updateAccessibilityDiagnostic(
-                                        "OCR kontrol video · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
+                                        "OCR ${orientationLabel()} · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
                                     )
                                 }
                                 controlCrop.recycle()
@@ -206,9 +208,9 @@ class SubtitleAccessibilityService : AccessibilityService() {
         // would add elapsed time again and defeat this short freeze.
         SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying && !seekCooldownActive)
         if (seekCooldownActive) {
-            SubtitleOverlayService.updateAccessibilityDiagnostic("Seek terdeteksi · posisi: ${estimated / 1000}s")
+            SubtitleOverlayService.updateAccessibilityDiagnostic("${orientationLabel()} · seek terdeteksi · posisi: ${estimated / 1000}s")
         } else if (lastKnownPlaying) {
-            SubtitleOverlayService.updateAccessibilityDiagnostic("Estimasi berjalan · posisi: ${estimated / 1000}s")
+            SubtitleOverlayService.updateAccessibilityDiagnostic("${orientationLabel()} · estimasi berjalan · posisi: ${estimated / 1000}s")
         }
     }
 
@@ -233,15 +235,15 @@ class SubtitleAccessibilityService : AccessibilityService() {
                     (duration == null || position < duration)) {
                     recordPosition(position)
                     SubtitleOverlayService.updateAccessibilityDiagnostic(
-                        packageName + " · posisi: " + (position / 1000) + "s" +
+                        orientationLabel() + " · " + packageName + " · posisi: " + (position / 1000) + "s" +
                             (duration?.let { " / ${it / 1000}s" } ?: "")
                     )
                     return
                 }
             }
             val message = if (seenPackage.isNotBlank()) {
-                seenPackage + " · waktu video belum terbaca"
-            } else "Jendela UC Browser tidak terlihat · windows: " + roots.size
+                orientationLabel() + " · " + seenPackage + " · waktu video belum terbaca"
+            } else orientationLabel() + " · jendela UC Browser tidak terlihat · windows: " + roots.size
             SubtitleOverlayService.updateAccessibilityDiagnostic(message)
         } catch (_: Exception) {
             SubtitleOverlayService.updateAccessibilityDiagnostic("Gagal membaca pohon Accessibility")
@@ -300,6 +302,26 @@ class SubtitleAccessibilityService : AccessibilityService() {
         val total = (hours * 3600L + minutes * 60L + seconds) * 1000L
         return total.takeIf { it in 0..MAX_VIDEO_MS }
     }
+    private fun orientationLabel(): String = when (resources.configuration.orientation) {
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE -> "LANDSCAPE"
+        android.content.res.Configuration.ORIENTATION_PORTRAIT -> "PORTRAIT"
+        else -> "ORIENTASI-TIDAK-DIKETAHUI"
+    }
+
+    private fun reportOrientationIfChanged() {
+        val current = orientationLabel()
+        if (current != lastOrientationLabel) {
+            val previous = lastOrientationLabel
+            lastOrientationLabel = current
+            val message = if (previous.isBlank()) {
+                "Orientasi terdeteksi: $current"
+            } else {
+                "Layar berubah: $previous → $current"
+            }
+            SubtitleOverlayService.updateAccessibilityDiagnostic(message)
+        }
+    }
+
     private fun isUcBrowser(packageName: String): Boolean =
         packageName.startsWith("com.UCMobile", ignoreCase = true) ||
             packageName.startsWith("com.uc.browser", ignoreCase = true)
