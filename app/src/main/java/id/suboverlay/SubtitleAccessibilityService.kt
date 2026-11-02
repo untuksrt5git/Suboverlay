@@ -119,15 +119,25 @@ class SubtitleAccessibilityService : AccessibilityService() {
             return
         }
         val delta = positionMs - lastPosition
-        if (kotlin.math.abs(delta) >= POSITION_CHANGE_THRESHOLD_MS) {
+        // OCR reads whole-second labels, which can wobble by 1 second between
+        // frames. Ignore small backwards readings instead of making the
+        // estimated clock run backwards.
+        if (delta < -OCR_BACKWARD_NOISE_MS) {
+            // A genuine seek-back changes the anchor, but normal playback
+            // continues forward from that new position.
             lastPosition = positionMs
-            // Anchor the clock to when the frame was captured, not when OCR
-            // finished. This prevents OCR processing delay accumulating as drift.
             lastPositionObservedAt = observedAtMs
             lastPositionChangeAt = now
             lastKnownPlaying = true
-            lastPlaybackDirection = if (delta < 0L) -1L else 1L
-        } else if (now - lastPositionChangeAt >= PLAYING_WINDOW_MS) {
+            lastPlaybackDirection = 1L
+        } else if (delta >= POSITION_CHANGE_THRESHOLD_MS) {
+            lastPosition = positionMs
+            // Anchor to screenshot capture time, not OCR completion time.
+            lastPositionObservedAt = observedAtMs
+            lastPositionChangeAt = now
+            lastKnownPlaying = true
+            lastPlaybackDirection = 1L
+        } else if (delta >= 0L && now - lastPositionChangeAt >= PLAYING_WINDOW_MS) {
             lastKnownPlaying = false
             lastPosition = positionMs
             lastPositionObservedAt = now
@@ -271,6 +281,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val POLL_INTERVAL_MS = 1_000L
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
+        private const val OCR_BACKWARD_NOISE_MS = 1_500L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
         private const val MIN_VIDEO_DURATION_MS = 10L * 60L * 1000L
         private const val MIN_DURATION_GAP_MS = 60L * 1000L
