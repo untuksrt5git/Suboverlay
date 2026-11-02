@@ -54,11 +54,11 @@ class MainActivity : Activity() {
         }
         layout.addView(accessibilityButton)
         layout.addView(Button(this).apply {
-            text = "Pilih file subtitle (.srt)"
+            text = "Pilih file subtitle (.srt / .vtt)"
             setOnClickListener {
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
+                    type = "text/*"
                 }, pickSubtitle)
             }
         })
