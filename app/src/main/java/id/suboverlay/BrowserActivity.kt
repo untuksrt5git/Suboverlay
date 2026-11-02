@@ -51,7 +51,7 @@ class BrowserActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         address = EditText(this).apply {
-            singleLine = true
+            setSingleLine(true)
             setText("https://supjav.com/")
             hint = "Alamat situs video"
         }
