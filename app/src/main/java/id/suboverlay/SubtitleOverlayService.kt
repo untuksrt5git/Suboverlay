@@ -38,6 +38,8 @@ class SubtitleOverlayService : Service() {
     private var accessibilityPositionMs = -1L
     private var accessibilityUpdatedAtMs = 0L
     private var accessibilityPlaying = false
+    private var subtitleTextSizeSp = 19f
+    private var overlayBackgroundAlpha = 204
     private val handler = Handler(Looper.getMainLooper())
     private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
 
@@ -120,10 +122,21 @@ class SubtitleOverlayService : Service() {
         addControl(adjustmentControls, "+5s") { manualOffsetMs += 5_000; renderSubtitle() }
         addControl(adjustmentControls, "Tutup") { stopOverlay(); stopSelf() }
 
+        val appearanceControls = makeControlRow()
+        addControl(appearanceControls, "A−") { adjustTextSize(-2f) }
+        addControl(appearanceControls, "A+") { adjustTextSize(2f) }
+        addControl(appearanceControls, "Op−") { adjustBackgroundAlpha(-20) }
+        addControl(appearanceControls, "Op+") { adjustBackgroundAlpha(20) }
+
+        val fineSyncControls = makeControlRow()
+        addControl(fineSyncControls, "Sync −0.5s") { manualOffsetMs -= 500; renderSubtitle() }
+        addControl(fineSyncControls, "Sync +0.5s") { manualOffsetMs += 500; renderSubtitle() }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xCC111111.toInt())
-            addView(text); addView(syncStatusView); addView(playbackControls); addView(adjustmentControls)
+            setBackgroundColor(Color.argb(overlayBackgroundAlpha, 17, 17, 17))
+            addView(text); addView(syncStatusView); addView(playbackControls)
+            addView(adjustmentControls); addView(appearanceControls); addView(fineSyncControls)
         }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -196,6 +209,18 @@ class SubtitleOverlayService : Service() {
         } catch (_: Exception) {
             updateSyncStatus("Gagal membaca MediaSession")
         }
+    }
+
+    private fun adjustTextSize(deltaSp: Float) {
+        subtitleTextSizeSp = (subtitleTextSizeSp + deltaSp).coerceIn(12f, 40f)
+        subtitleView?.textSize = subtitleTextSizeSp
+    }
+
+    private fun adjustBackgroundAlpha(delta: Int) {
+        overlayBackgroundAlpha = (overlayBackgroundAlpha + delta).coerceIn(60, 255)
+        val color = Color.argb(overlayBackgroundAlpha, 17, 17, 17)
+        overlay?.setBackgroundColor(color)
+        subtitleView?.setBackgroundColor(color)
     }
 
     private fun updateSyncStatus(message: String) {
