@@ -164,6 +164,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
-        private const val MAX_DEPTH = 25\n        private const val MAX_DIAGNOSTIC_NODES = 6
+        private const val MAX_DEPTH = 25
+        private const val MAX_DIAGNOSTIC_NODES = 6
     }
 }
