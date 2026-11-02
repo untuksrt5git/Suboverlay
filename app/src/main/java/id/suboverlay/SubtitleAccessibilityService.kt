@@ -22,6 +22,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastPosition = -1L
     private var lastPositionChangeAt = 0L
+    private var lastPositionObservedAt = 0L
+    private var lastKnownPlaying = false
     private var screenshotInProgress = false
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -30,6 +32,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
         override fun run() {
             scanActiveWindow()
             if (android.os.Build.VERSION.SDK_INT >= 30) captureScreenForTime()
+            publishEstimatedPosition()
             handler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
@@ -71,13 +74,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                     val elapsed = times.first()
                                     if (duration >= MIN_VIDEO_DURATION_MS && duration <= MAX_VIDEO_MS &&
                                         elapsed < duration && duration - elapsed >= MIN_DURATION_GAP_MS) {
-                                        val now = SystemClock.elapsedRealtime()
-                                        if (lastPosition < 0L || kotlin.math.abs(elapsed - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
-                                            lastPosition = elapsed
-                                            lastPositionChangeAt = now
-                                        }
-                                        val playing = now - lastPositionChangeAt < PLAYING_WINDOW_MS
-                                        SubtitleOverlayService.updateAccessibilityPosition(elapsed, playing)
+                                        recordPosition(elapsed)
                                         SubtitleOverlayService.updateAccessibilityDiagnostic(
                                             "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
                                         )
@@ -104,6 +101,49 @@ class SubtitleAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Cache the last confirmed video time. Movement means playback is active;
+     * repeated identical readings for a short grace period indicate pause.
+     */
+    private fun recordPosition(positionMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        if (lastPosition < 0L) {
+            lastPosition = positionMs
+            lastPositionObservedAt = now
+            lastPositionChangeAt = now
+            return
+        }
+        val delta = positionMs - lastPosition
+        if (kotlin.math.abs(delta) >= POSITION_CHANGE_THRESHOLD_MS) {
+            lastPosition = positionMs
+            lastPositionObservedAt = now
+            lastPositionChangeAt = now
+            lastKnownPlaying = delta > 0L
+        } else if (now - lastPositionChangeAt >= PLAYING_WINDOW_MS) {
+            lastKnownPlaying = false
+            lastPosition = positionMs
+            lastPositionObservedAt = now
+        }
+    }
+
+    /**
+     * When controls/time labels disappear, extrapolate cheaply from the last
+     * confirmed position. No browser-tree traversal or screenshot is done here.
+     */
+    private fun publishEstimatedPosition() {
+        if (lastPosition < 0L) return
+        val now = SystemClock.elapsedRealtime()
+        val estimated = if (lastKnownPlaying) {
+            lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L)
+        } else {
+            lastPosition
+        }
+        SubtitleOverlayService.updateAccessibilityPosition(estimated, lastKnownPlaying)
+        if (lastKnownPlaying) {
+            SubtitleOverlayService.updateAccessibilityDiagnostic("Estimasi berjalan · posisi: ${estimated / 1000}s")
+        }
+    }
+
     private fun scanActiveWindow() {
         val roots = mutableListOf<AccessibilityNodeInfo>()
         try {
@@ -119,13 +159,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 val position = findSeekPosition(root, 0).takeIf { it >= 0L }
                     ?: findPositionFromTimeLabels(root)
                 if (position != null && position >= 0L) {
-                    val now = SystemClock.elapsedRealtime()
-                    if (lastPosition < 0L || kotlin.math.abs(position - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
-                        lastPosition = position
-                        lastPositionChangeAt = now
-                    }
-                    val appearsPlaying = now - lastPositionChangeAt < PLAYING_WINDOW_MS
-                    SubtitleOverlayService.updateAccessibilityPosition(position, appearsPlaying)
+                    recordPosition(position)
                     SubtitleOverlayService.updateAccessibilityDiagnostic(packageName + " · posisi: " + (position / 1000) + "s")
                     return
                 }
