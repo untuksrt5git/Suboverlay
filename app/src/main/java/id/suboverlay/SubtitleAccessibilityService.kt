@@ -4,6 +4,12 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.graphics.Bitmap
+import android.view.Display
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import java.util.concurrent.Executors
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -16,10 +22,14 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastPosition = -1L
     private var lastPositionChangeAt = 0L
+    private var screenshotInProgress = false
+    private val screenshotExecutor = Executors.newSingleThreadExecutor()
+    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     private val poll = object : Runnable {
         override fun run() {
             scanActiveWindow()
+            if (android.os.Build.VERSION.SDK_INT >= 30) captureScreenForTime()
             handler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
@@ -32,6 +42,66 @@ class SubtitleAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         scanActiveWindow()
+    }
+
+
+    /** OCR fallback using Android's Accessibility screenshot API (Android 11+). */
+    @android.annotation.TargetApi(30)
+    private fun captureScreenForTime() {
+        if (screenshotInProgress) return
+        screenshotInProgress = true
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    try {
+                        val buffer = result.hardwareBuffer
+                        val bitmap = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
+                        buffer.close()
+                        if (bitmap == null) {
+                            screenshotInProgress = false
+                            return
+                        }
+                        textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+                            .addOnSuccessListener(screenshotExecutor) { visionText ->
+                                val times = visionText.textBlocks.flatMap { block ->
+                                    block.lines.mapNotNull { line -> parseVideoTime(line.text) }
+                                }.distinct().sorted()
+                                if (times.size >= 2) {
+                                    val duration = times.last()
+                                    val elapsed = times.first()
+                                    if (duration >= MIN_VIDEO_DURATION_MS && duration <= MAX_VIDEO_MS &&
+                                        elapsed < duration && duration - elapsed >= MIN_DURATION_GAP_MS) {
+                                        val now = SystemClock.elapsedRealtime()
+                                        if (lastPosition < 0L || kotlin.math.abs(elapsed - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
+                                            lastPosition = elapsed
+                                            lastPositionChangeAt = now
+                                        }
+                                        val playing = now - lastPositionChangeAt < PLAYING_WINDOW_MS
+                                        SubtitleOverlayService.updateAccessibilityPosition(elapsed, playing)
+                                        SubtitleOverlayService.updateAccessibilityDiagnostic(
+                                            "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
+                                        )
+                                    }
+                                }
+                                bitmap.recycle()
+                                screenshotInProgress = false
+                            }
+                            .addOnFailureListener(screenshotExecutor) {
+                                bitmap.recycle()
+                                screenshotInProgress = false
+                            }
+                    } catch (_: Exception) {
+                        screenshotInProgress = false
+                    }
+                }
+                override fun onFailure(errorCode: Int) {
+                    screenshotInProgress = false
+                    SubtitleOverlayService.updateAccessibilityDiagnostic("OCR screenshot gagal · kode $errorCode")
+                }
+            })
+        } catch (_: Exception) {
+            screenshotInProgress = false
+        }
     }
 
     private fun scanActiveWindow() {
@@ -197,11 +267,13 @@ class SubtitleAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        screenshotExecutor.shutdown()
+        textRecognizer.close()
         super.onDestroy()
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 500L
+        private const val POLL_INTERVAL_MS = 1_000L
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
