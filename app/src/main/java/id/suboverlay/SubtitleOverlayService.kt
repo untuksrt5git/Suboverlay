@@ -238,6 +238,12 @@ class SubtitleOverlayService : Service() {
             // A freshly updated MediaSession that jumps far from the cached OCR estimate
             // is likely reporting a new seek. Use it immediately instead of waiting for OCR.
             if (selected != null && (!accessibilityFreshNow || (sessionRecentlyUpdated && sessionShowsSeek))) {
+                if (sessionRecentlyUpdated && sessionShowsSeek) {
+                    // A fresh, large MediaSession jump is a seek. Discard the old
+                    // Accessibility/OCR anchor so it cannot pull subtitles back to 191s.
+                    manualOffsetMs = 0L
+                    SubtitleAccessibilityService.resetPositionCache()
+                }
                 val (controller, state) = selected
                 manualPositionMs = sessionPosition ?: state.position
                 val stateLabel = if (state.state == PlaybackState.STATE_PLAYING) "PLAY" else "PAUSE"
