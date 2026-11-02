@@ -6,6 +6,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 /**
  * Reads the real seekbar range exposed by UC Browser's Android accessibility tree.
@@ -34,30 +35,50 @@ class SubtitleAccessibilityService : AccessibilityService() {
     }
 
     private fun scanActiveWindow() {
-        val root = rootInActiveWindow ?: return
+        val roots = mutableListOf<AccessibilityNodeInfo>()
         try {
-            val packageName = root.packageName?.toString().orEmpty()
-            // Limit collection to UC Browser variants; never inspect unrelated apps.
-            if (!isUcBrowser(packageName)) return
-
-            val position = findSeekPosition(root, 0)
-            if (position >= 0L) {
-                val now = SystemClock.elapsedRealtime()
-                if (lastPosition < 0L || kotlin.math.abs(position - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
-                    lastPosition = position
-                    lastPositionChangeAt = now
+            // The video player may live in a non-active browser window.
+            for (window in windows) window.root?.let { roots.add(it) }
+            if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
+            var seenPackage = ""
+            var rangeCount = 0
+            for (root in roots) {
+                val packageName = root.packageName?.toString().orEmpty()
+                if (!isUcBrowser(packageName)) continue
+                seenPackage = packageName
+                rangeCount += countRangeNodes(root, 0)
+                val position = findSeekPosition(root, 0)
+                if (position >= 0L) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (lastPosition < 0L || kotlin.math.abs(position - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
+                        lastPosition = position
+                        lastPositionChangeAt = now
+                    }
+                    val appearsPlaying = now - lastPositionChangeAt < PLAYING_WINDOW_MS
+                    SubtitleOverlayService.updateAccessibilityPosition(position, appearsPlaying)
+                    SubtitleOverlayService.updateAccessibilityDiagnostic(packageName + " · RangeInfo: " + rangeCount + " · posisi: " + (position / 1000) + "s")
+                    return
                 }
-                // A moving timeline indicates playback; a stable timeline is treated as paused.
-                val appearsPlaying = now - lastPositionChangeAt < PLAYING_WINDOW_MS
-                SubtitleOverlayService.Companion.updateAccessibilityPosition(position, appearsPlaying)
             }
+            val message = if (seenPackage.isNotBlank()) seenPackage + " · RangeInfo: " + rangeCount + " · seekbar tidak tersedia"
+                else "Jendela UC Browser tidak terlihat · windows: " + roots.size
+            SubtitleOverlayService.updateAccessibilityDiagnostic(message)
         } catch (_: Exception) {
-            // Retry on the next poll if the browser replaces its accessibility nodes.
+            SubtitleOverlayService.updateAccessibilityDiagnostic("Gagal membaca pohon Accessibility")
         } finally {
-            root.recycle()
+            roots.forEach { try { it.recycle() } catch (_: Exception) { } }
         }
     }
 
+    private fun countRangeNodes(node: AccessibilityNodeInfo, depth: Int): Int {
+        if (depth > MAX_DEPTH) return 0
+        var count = if (node.rangeInfo != null) 1 else 0
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            count += try { countRangeNodes(child, depth + 1) } finally { child.recycle() }
+        }
+        return count
+    }
     private fun isUcBrowser(packageName: String): Boolean =
         packageName.startsWith("com.UCMobile", ignoreCase = true) ||
             packageName.startsWith("com.uc.browser", ignoreCase = true)
