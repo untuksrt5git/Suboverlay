@@ -5,7 +5,7 @@ data class SubtitleCue(val startMs: Long, val endMs: Long, val text: String)
 object SrtParser {
     // Accepts SRT and WebVTT timestamps, with optional hours and 1-3 millisecond digits.
     private val timestamp = Regex(
-        """(?:(\\d{1,2}):)?(\\d{2}):(\\d{2})[,.](\\d{1,3})\\s*-->\\s*(?:(\\d{1,2}):)?(\\d{2}):(\\d{2})[,.](\\d{1,3})"""
+        """(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{1,3})"""
     )
     private val tags = Regex("""<[^>]*>""")
 
