@@ -70,17 +70,19 @@ class SubtitleAccessibilityService : AccessibilityService() {
                             .addOnSuccessListener(screenshotExecutor) { visionText ->
                                 val times = visionText.textBlocks.flatMap { block ->
                                     block.lines.mapNotNull { line -> parseVideoTime(line.text) }
-                                }.distinct().sorted()
-                                if (times.size >= 2) {
-                                    val duration = times.last()
-                                    val elapsed = times.first()
-                                    if (duration >= MIN_VIDEO_DURATION_MS && duration <= MAX_VIDEO_MS &&
-                                        elapsed < duration && duration - elapsed >= MIN_DURATION_GAP_MS) {
-                                        recordPosition(elapsed, screenshotCapturedAt)
-                                        SubtitleOverlayService.updateAccessibilityDiagnostic(
-                                            "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
-                                        )
-                                    }
+                                }.distinct()
+                                val duration = times.filter { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }.maxOrNull()
+                                val elapsed = duration?.let { total ->
+                                    // Prefer the largest plausible elapsed timestamp below the
+                                    // total duration; short page timestamps must not win.
+                                    times.filter { it < total && total - it >= MIN_DURATION_GAP_MS }
+                                        .maxOrNull()
+                                }
+                                if (duration != null && elapsed != null) {
+                                    recordPosition(elapsed, screenshotCapturedAt)
+                                    SubtitleOverlayService.updateAccessibilityDiagnostic(
+                                        "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
+                                    )
                                 }
                                 bitmap.recycle()
                                 screenshotInProgress = false
@@ -173,12 +175,12 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 val packageName = root.packageName?.toString().orEmpty()
                 if (!isUcBrowser(packageName)) continue
                 seenPackage = packageName
-                // First obtain a plausible total duration from the player labels.
-                // A seekbar with a small numeric range (for example 0..100 or 0..1000)
-                // is a fraction/percentage, not milliseconds or seconds.
+                // Ignore generic RangeInfo seekbars: UC pages can expose ad,
+                // page-scroll, or unrelated progress controls before the actual video.
+                // Use paired elapsed/total labels instead; screenshot OCR is the
+                // fallback when the player hides those labels from Accessibility.
                 val duration = findVideoDuration(root)
-                val position = findSeekPosition(root, 0, duration).takeIf { it >= 0L }
-                    ?: findPositionFromTimeLabels(root)
+                val position = findPositionFromTimeLabels(root)
                 if (position != null && position >= 0L &&
                     (duration == null || position < duration)) {
                     recordPosition(position)
@@ -223,8 +225,9 @@ class SubtitleAccessibilityService : AccessibilityService() {
         // not allowed to become the playback position by themselves.
         val duration = distinct.lastOrNull { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }
             ?: return null
-        val elapsed = distinct.firstOrNull { it < duration } ?: return null
-        if (duration - elapsed < MIN_DURATION_GAP_MS) return null
+        val elapsed = distinct.lastOrNull {
+            it < duration && duration - it >= MIN_DURATION_GAP_MS
+        } ?: return null
         return elapsed
     }
 
