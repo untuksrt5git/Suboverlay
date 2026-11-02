@@ -10,7 +10,7 @@ object SrtParser {
     fun parse(input: String): List<SubtitleCue> {
         val normalized = input.removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
         val cues = mutableListOf<SubtitleCue>()
-        normalized.split(Regex("\n\s*\n")).forEach { block ->
+        normalized.split(Regex("""\n\s*\n""")).forEach { block ->
             val lines = block.lines()
             val timeIndex = lines.indexOfFirst { timestamp.containsMatchIn(it) }
             if (timeIndex < 0) return@forEach
