@@ -31,6 +31,8 @@ class SubtitleOverlayService : Service() {
     private var cues: List<SubtitleCue> = emptyList()
     private var manualPositionMs = 0L
     private var manualOffsetMs = 0L
+    private var fallbackStartedAtMs = 0L
+    private var fallbackRunning = false
     private val handler = Handler(Looper.getMainLooper())
     private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
 
@@ -60,6 +62,8 @@ class SubtitleOverlayService : Service() {
         cues = SrtParser.parse(content)
         manualPositionMs = 0L
         manualOffsetMs = 0L
+        fallbackStartedAtMs = 0L
+        fallbackRunning = false
         renderSubtitle()
     }
 
@@ -79,6 +83,19 @@ class SubtitleOverlayService : Service() {
                 this.text = label; textSize = 11f
                 setOnClickListener { action() }
             })
+        }
+        addControl("Mulai") {
+            if (!fallbackRunning) {
+                fallbackStartedAtMs = SystemClock.elapsedRealtime() - manualPositionMs
+                fallbackRunning = true
+            }
+        }
+        addControl("Jeda") {
+            if (fallbackRunning) {
+                manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
+                fallbackRunning = false
+                renderSubtitle()
+            }
         }
         addControl("−5s") { manualOffsetMs -= 5_000; renderSubtitle() }
         addControl("+5s") { manualOffsetMs += 5_000; renderSubtitle() }
@@ -131,12 +148,17 @@ class SubtitleOverlayService : Service() {
         try {
             val manager = getSystemService(MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
             val sessions = manager.getActiveSessions(ComponentName(this, SessionAccessService::class.java))
-            val state = sessions.firstNotNullOfOrNull { it.playbackState }
-            if (state != null && state.position >= 0L &&
-                (state.state == PlaybackState.STATE_PLAYING || state.state == PlaybackState.STATE_PAUSED)) {
+            val state = sessions.firstNotNullOfOrNull { session ->
+                session.playbackState?.takeIf { it.position >= 0L &&
+                    (it.state == PlaybackState.STATE_PLAYING || it.state == PlaybackState.STATE_PAUSED) }
+            }
+            if (state != null) {
                 val elapsed = if (state.state == PlaybackState.STATE_PLAYING)
                     (SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
                 manualPositionMs = state.position + elapsed
+                renderSubtitle()
+            } else if (fallbackRunning) {
+                manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
                 renderSubtitle()
             }
         } catch (_: Exception) { }
