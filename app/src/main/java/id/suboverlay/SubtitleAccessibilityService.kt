@@ -60,35 +60,55 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 override fun onSuccess(result: ScreenshotResult) {
                     try {
                         val buffer = result.hardwareBuffer
-                        val bitmap = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
+                        val hardwareBitmap = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)
                         buffer.close()
+                        if (hardwareBitmap == null) {
+                            screenshotInProgress = false
+                            return
+                        }
+
+                        // Convert to a software bitmap, then OCR only the bottom control
+                        // strip where UC Browser/Supjav displays elapsed and total time.
+                        val bitmap = hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                        hardwareBitmap.recycle()
                         if (bitmap == null) {
                             screenshotInProgress = false
                             return
                         }
-                        textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        val cropTop = (bitmap.height * OCR_CROP_TOP_RATIO).toInt()
+                            .coerceIn(0, bitmap.height - 1)
+                        val cropBottom = (bitmap.height * OCR_CROP_BOTTOM_RATIO).toInt()
+                            .coerceIn(cropTop + 1, bitmap.height)
+                        val cropLeft = (bitmap.width * OCR_CROP_LEFT_RATIO).toInt()
+                            .coerceIn(0, bitmap.width - 1)
+                        val cropRight = (bitmap.width * OCR_CROP_RIGHT_RATIO).toInt()
+                            .coerceIn(cropLeft + 1, bitmap.width)
+                        val controlCrop = Bitmap.createBitmap(
+                            bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop
+                        )
+                        bitmap.recycle()
+
+                        textRecognizer.process(InputImage.fromBitmap(controlCrop, 0))
                             .addOnSuccessListener(screenshotExecutor) { visionText ->
                                 val times = visionText.textBlocks.flatMap { block ->
                                     block.lines.mapNotNull { line -> parseVideoTime(line.text) }
                                 }.distinct()
                                 val duration = times.filter { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }.maxOrNull()
                                 val elapsed = duration?.let { total ->
-                                    // Prefer the largest plausible elapsed timestamp below the
-                                    // total duration; short page timestamps must not win.
-                                    times.filter { it < total && total - it >= MIN_DURATION_GAP_MS }
-                                        .maxOrNull()
+                                    // The crop excludes page titles, ads, and unrelated timestamps.
+                                    times.filter { it < total && total - it >= MIN_DURATION_GAP_MS }.maxOrNull()
                                 }
                                 if (duration != null && elapsed != null) {
                                     recordPosition(elapsed, screenshotCapturedAt)
                                     SubtitleOverlayService.updateAccessibilityDiagnostic(
-                                        "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
+                                        "OCR kontrol video · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
                                     )
                                 }
-                                bitmap.recycle()
+                                controlCrop.recycle()
                                 screenshotInProgress = false
                             }
                             .addOnFailureListener(screenshotExecutor) {
-                                bitmap.recycle()
+                                controlCrop.recycle()
                                 screenshotInProgress = false
                             }
                     } catch (_: Exception) {
@@ -317,6 +337,12 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
         private const val MIN_VIDEO_DURATION_MS = 10L * 60L * 1000L
         private const val MIN_DURATION_GAP_MS = 60L * 1000L
+        // Relative to full-screen screenshot; matches the visible player controls
+        // in the supplied UC Browser screenshot.
+        private const val OCR_CROP_TOP_RATIO = 0.69f
+        private const val OCR_CROP_BOTTOM_RATIO = 0.755f
+        private const val OCR_CROP_LEFT_RATIO = 0.02f
+        private const val OCR_CROP_RIGHT_RATIO = 0.98f
         private const val MAX_TIME_LABELS = 24
         private val VIDEO_TIME_REGEX = Regex("""^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})$""")
         private const val MAX_DEPTH = 25
