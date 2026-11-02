@@ -46,6 +46,13 @@ class MainActivity : Activity() {
         }
         layout.addView(syncButton)
         layout.addView(Button(this).apply {
+            text = "Aktifkan Accessibility untuk posisi video"
+            setOnClickListener {
+                Toast.makeText(this@MainActivity, "Di Pengaturan Aksesibilitas, aktifkan Suboverlay Video Position.", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        })
+        layout.addView(Button(this).apply {
             text = "Pilih file subtitle (.srt)"
             setOnClickListener {
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
