@@ -4,13 +4,12 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * Reads only an actual seek/progress control exposed by the foreground app.
- * Time labels are intentionally ignored because they may be the video duration,
- * an advertisement timer, or unrelated page text.
+ * Reads the real seekbar range exposed by UC Browser's Android accessibility tree.
+ * It deliberately ignores ordinary time labels because they may be duration/ad timers.
  */
 class SubtitleAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -37,6 +36,10 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private fun scanActiveWindow() {
         val root = rootInActiveWindow ?: return
         try {
+            val packageName = root.packageName?.toString().orEmpty()
+            // Limit collection to UC Browser variants; never inspect unrelated apps.
+            if (!isUcBrowser(packageName)) return
+
             val position = findSeekPosition(root, 0)
             if (position >= 0L) {
                 val now = SystemClock.elapsedRealtime()
@@ -44,16 +47,20 @@ class SubtitleAccessibilityService : AccessibilityService() {
                     lastPosition = position
                     lastPositionChangeAt = now
                 }
-                // Infer playback only from a changing seekbar. A static seekbar is treated as paused.
+                // A moving timeline indicates playback; a stable timeline is treated as paused.
                 val appearsPlaying = now - lastPositionChangeAt < PLAYING_WINDOW_MS
-                SubtitleOverlayService.updateAccessibilityPosition(position, appearsPlaying)
+                SubtitleOverlayService.Companion.updateAccessibilityPosition(position, appearsPlaying)
             }
         } catch (_: Exception) {
-            // Some apps expose transient or invalid accessibility nodes; retry on next poll.
+            // Retry on the next poll if the browser replaces its accessibility nodes.
         } finally {
             root.recycle()
         }
     }
+
+    private fun isUcBrowser(packageName: String): Boolean =
+        packageName.startsWith("com.UCMobile", ignoreCase = true) ||
+            packageName.startsWith("com.uc.browser", ignoreCase = true)
 
     private fun findSeekPosition(node: AccessibilityNodeInfo, depth: Int): Long {
         if (depth > MAX_DEPTH) return -1L
@@ -68,17 +75,21 @@ class SubtitleAccessibilityService : AccessibilityService() {
             val current = range.current
             if (looksLikeSeekBar && max > 0f && current >= 0f && current <= max) {
                 val valueMs = when {
-                    max > 100_000f -> current.toLong() // already milliseconds
-                    max > 120f -> (current * 1000f).toLong() // typical seconds-based range
-                    else -> -1L // likely volume/percentage, not a trustworthy timeline
+                    max > 100_000f -> current.toLong()
+                    max > 120f -> (current * 1000f).toLong()
+                    else -> -1L
                 }
-                if (valueMs >= 0L && valueMs <= MAX_VIDEO_MS) return valueMs
+                if (valueMs in 0..MAX_VIDEO_MS) return valueMs
             }
         }
 
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue
-            val result = try { findSeekPosition(child, depth + 1) } finally { child.recycle() }
+            val result = try {
+                findSeekPosition(child, depth + 1)
+            } finally {
+                child.recycle()
+            }
             if (result >= 0L) return result
         }
         return -1L
@@ -93,7 +104,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val POLL_INTERVAL_MS = 500L
-        private const val PLAYING_WINDOW_MS = 1_500L
+        private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
         private const val MAX_DEPTH = 25
