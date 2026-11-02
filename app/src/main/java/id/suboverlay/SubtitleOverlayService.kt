@@ -223,7 +223,11 @@ class SubtitleOverlayService : Service() {
             }
             val selected = candidates.firstOrNull { it.first.packageName.startsWith("com.UCMobile", true) || it.first.packageName.startsWith("com.uc.browser", true) }
                 ?: candidates.firstOrNull()
-            if (selected != null) {
+            val accessibilityFreshNow = accessibilityPositionMs >= 0L &&
+                SystemClock.elapsedRealtime() - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
+            // Prefer the browser's directly observed seek position briefly after a seek.
+            // MediaSession can report its previous position for a moment while UC updates.
+            if (selected != null && !accessibilityFreshNow) {
                 val (controller, state) = selected
                 val elapsed = if (state.state == PlaybackState.STATE_PLAYING)
                     (SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
