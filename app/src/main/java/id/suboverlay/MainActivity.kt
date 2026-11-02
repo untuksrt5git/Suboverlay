@@ -54,6 +54,17 @@ class MainActivity : Activity() {
         }
         layout.addView(accessibilityButton)
         layout.addView(Button(this).apply {
+            text = "Atur area OCR (posisi waktu video)"
+            setOnClickListener {
+                if (!Settings.canDrawOverlays(this@MainActivity)) {
+                    Toast.makeText(this@MainActivity, "Izinkan Suboverlay tampil di atas aplikasi lain terlebih dahulu.", Toast.LENGTH_LONG).show()
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+                } else {
+                    startService(Intent(this@MainActivity, OcrAreaSelectionService::class.java))
+                }
+            }
+        })
+        layout.addView(Button(this).apply {
             text = "Pilih file subtitle (.srt / .vtt)"
             setOnClickListener {
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
