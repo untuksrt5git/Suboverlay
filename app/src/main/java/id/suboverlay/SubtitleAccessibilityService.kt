@@ -313,6 +313,18 @@ class SubtitleAccessibilityService : AccessibilityService() {
         if (current != lastOrientationLabel) {
             val previous = lastOrientationLabel
             lastOrientationLabel = current
+            if (previous.isNotBlank()) {
+                // Drop the previous orientation's cached playback anchor.
+                lastPosition = -1L
+                lastPositionObservedAt = 0L
+                lastPositionChangeAt = 0L
+                lastKnownPlaying = false
+                justSeekedUntil = SystemClock.elapsedRealtime() + ORIENTATION_REFRESH_MS
+                screenshotInProgress = false
+                SubtitleOverlayService.resetAccessibilitySyncForOrientation(
+                    "Layar berubah: $previous -> $current · membaca ulang posisi"
+                )
+            }
             val message = if (previous.isBlank()) {
                 "Orientasi terdeteksi: $current"
             } else {
@@ -385,6 +397,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val SEEK_THRESHOLD_MS = 2_000L
         private const val SEEK_COOLDOWN_MS = 1_500L
+        private const val ORIENTATION_REFRESH_MS = 2_000L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
         private const val MIN_VIDEO_DURATION_MS = 10L * 60L * 1000L
         private const val MIN_DURATION_GAP_MS = 60L * 1000L
