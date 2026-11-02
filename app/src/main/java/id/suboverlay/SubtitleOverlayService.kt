@@ -38,6 +38,7 @@ class SubtitleOverlayService : Service() {
     private var accessibilityPositionMs = -1L
     private var accessibilityUpdatedAtMs = 0L
     private var accessibilityPlaying = false
+    private var accessibilityDiagnostic = "menunggu data browser"
     private var subtitleTextSizeSp = 19f
     private var overlayBackgroundAlpha = 204
     private val handler = Handler(Looper.getMainLooper())
@@ -197,7 +198,7 @@ class SubtitleOverlayService : Service() {
                     renderSubtitle()
                 } else {
                     val packageList = sessions.map { it.packageName }.distinct().take(3).joinToString()
-                    updateSyncStatus(if (packageList.isBlank()) "MediaSession/seekbar belum terdeteksi" else "Sesi lain: $packageList · seekbar tidak terbaca")
+                    updateSyncStatus((if (packageList.isBlank()) "MediaSession/seekbar belum terdeteksi" else "Sesi lain: $packageList · seekbar tidak terbaca") + "\nA11y: " + accessibilityDiagnostic)
                     if (fallbackRunning) {
                         manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
                         renderSubtitle()
@@ -257,6 +258,10 @@ class SubtitleOverlayService : Service() {
         private const val ACCESSIBILITY_FRESH_MS = 2_000L
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
+
+        fun updateAccessibilityDiagnostic(message: String) {
+            currentInstance?.let { it.accessibilityDiagnostic = message }
+        }
 
         fun updateAccessibilityPosition(positionMs: Long, playing: Boolean) {
             currentInstance?.let { service ->
