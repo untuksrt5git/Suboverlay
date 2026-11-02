@@ -75,9 +75,14 @@ class SubtitleAccessibilityService : AccessibilityService() {
                             screenshotInProgress = false
                             return
                         }
-                        val cropTop = (bitmap.height * OCR_CROP_TOP_RATIO).toInt()
+                        // Full-screen rotates the display: the control bar moves
+                        // close to the bottom edge in landscape, so use a wider vertical band.
+                        val isLandscape = bitmap.width > bitmap.height
+                        val cropTopRatio = if (isLandscape) LANDSCAPE_CROP_TOP_RATIO else PORTRAIT_CROP_TOP_RATIO
+                        val cropBottomRatio = if (isLandscape) LANDSCAPE_CROP_BOTTOM_RATIO else PORTRAIT_CROP_BOTTOM_RATIO
+                        val cropTop = (bitmap.height * cropTopRatio).toInt()
                             .coerceIn(0, bitmap.height - 1)
-                        val cropBottom = (bitmap.height * OCR_CROP_BOTTOM_RATIO).toInt()
+                        val cropBottom = (bitmap.height * cropBottomRatio).toInt()
                             .coerceIn(cropTop + 1, bitmap.height)
                         val cropLeft = (bitmap.width * OCR_CROP_LEFT_RATIO).toInt()
                             .coerceIn(0, bitmap.width - 1)
@@ -339,8 +344,11 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val MIN_DURATION_GAP_MS = 60L * 1000L
         // Relative to full-screen screenshot; matches the visible player controls
         // in the supplied UC Browser screenshot.
-        private const val OCR_CROP_TOP_RATIO = 0.69f
-        private const val OCR_CROP_BOTTOM_RATIO = 0.755f
+        private const val PORTRAIT_CROP_TOP_RATIO = 0.69f
+        private const val PORTRAIT_CROP_BOTTOM_RATIO = 0.755f
+        // In landscape fullscreen, player controls are usually near the lower edge.
+        private const val LANDSCAPE_CROP_TOP_RATIO = 0.78f
+        private const val LANDSCAPE_CROP_BOTTOM_RATIO = 0.98f
         private const val OCR_CROP_LEFT_RATIO = 0.02f
         private const val OCR_CROP_RIGHT_RATIO = 0.98f
         private const val MAX_TIME_LABELS = 24
