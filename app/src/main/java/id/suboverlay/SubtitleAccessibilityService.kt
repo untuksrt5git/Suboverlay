@@ -82,16 +82,18 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         // Full-screen rotates the display: the control bar moves
                         // close to the bottom edge in landscape, so use a wider vertical band.
                         val isLandscape = bitmap.width > bitmap.height
-                        val cropTopRatio = if (isLandscape) LANDSCAPE_CROP_TOP_RATIO else PORTRAIT_CROP_TOP_RATIO
-                        val cropBottomRatio = if (isLandscape) LANDSCAPE_CROP_BOTTOM_RATIO else PORTRAIT_CROP_BOTTOM_RATIO
-                        val cropTop = (bitmap.height * cropTopRatio).toInt()
-                            .coerceIn(0, bitmap.height - 1)
-                        val cropBottom = (bitmap.height * cropBottomRatio).toInt()
-                            .coerceIn(cropTop + 1, bitmap.height)
-                        val cropLeft = (bitmap.width * OCR_CROP_LEFT_RATIO).toInt()
-                            .coerceIn(0, bitmap.width - 1)
-                        val cropRight = (bitmap.width * OCR_CROP_RIGHT_RATIO).toInt()
-                            .coerceIn(cropLeft + 1, bitmap.width)
+                        val areaPrefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
+                        val areaKey = if (isLandscape) "landscape" else "portrait"
+                        val defaultTop = if (isLandscape) LANDSCAPE_CROP_TOP_RATIO else PORTRAIT_CROP_TOP_RATIO
+                        val defaultBottom = if (isLandscape) LANDSCAPE_CROP_BOTTOM_RATIO else PORTRAIT_CROP_BOTTOM_RATIO
+                        val leftRatio = areaPrefs.getFloat("${areaKey}_left", OCR_CROP_LEFT_RATIO)
+                        val rightRatio = areaPrefs.getFloat("${areaKey}_right", OCR_CROP_RIGHT_RATIO)
+                        val cropTopRatio = areaPrefs.getFloat("${areaKey}_top", defaultTop)
+                        val cropBottomRatio = areaPrefs.getFloat("${areaKey}_bottom", defaultBottom)
+                        val cropTop = (bitmap.height * cropTopRatio).toInt().coerceIn(0, bitmap.height - 1)
+                        val cropBottom = (bitmap.height * cropBottomRatio).toInt().coerceIn(cropTop + 1, bitmap.height)
+                        val cropLeft = (bitmap.width * leftRatio).toInt().coerceIn(0, bitmap.width - 1)
+                        val cropRight = (bitmap.width * rightRatio).toInt().coerceIn(cropLeft + 1, bitmap.width)
                         val controlCrop = Bitmap.createBitmap(
                             bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop
                         )
