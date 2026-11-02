@@ -18,6 +18,7 @@ import android.widget.Toast
 class MainActivity : Activity() {
     private val pickSubtitle = 1001
     private lateinit var syncButton: Button
+    private lateinit var accessibilityButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,13 +46,13 @@ class MainActivity : Activity() {
             }
         }
         layout.addView(syncButton)
-        layout.addView(Button(this).apply {
-            text = "Aktifkan Accessibility untuk posisi video"
+        accessibilityButton = Button(this).apply {
             setOnClickListener {
-                Toast.makeText(this@MainActivity, "Di Pengaturan Aksesibilitas, aktifkan Suboverlay Video Position.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@MainActivity, "Pastikan layanan Suboverlay Video Position diaktifkan.", Toast.LENGTH_LONG).show()
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
-        })
+        }
+        layout.addView(accessibilityButton)
         layout.addView(Button(this).apply {
             text = "Pilih file subtitle (.srt)"
             setOnClickListener {
@@ -85,7 +86,8 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (::syncButton.isInitialized) {
-            syncButton.text = if (isNotificationListenerEnabled()) "Sinkronisasi video: AKTIF" else "Aktifkan sinkronisasi video"
+            syncButton.text = if (isNotificationListenerEnabled()) "MediaSession: AKTIF" else "Aktifkan akses MediaSession"
+            accessibilityButton.text = if (isAccessibilityServiceEnabled()) "Accessibility: AKTIF" else "Aktifkan Accessibility seekbar"
         }
         pendingUri?.let {
             if (Settings.canDrawOverlays(this)) {
@@ -98,6 +100,12 @@ class MainActivity : Activity() {
     private fun isNotificationListenerEnabled(): Boolean {
         val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
         val target = ComponentName(this, SessionAccessService::class.java)
+        return enabled.split(":").any { ComponentName.unflattenFromString(it) == target }
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
+        val target = ComponentName(this, SubtitleAccessibilityService::class.java)
         return enabled.split(":").any { ComponentName.unflattenFromString(it) == target }
     }
 
