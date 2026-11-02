@@ -223,20 +223,27 @@ class SubtitleOverlayService : Service() {
             }
             val selected = candidates.firstOrNull { it.first.packageName.startsWith("com.UCMobile", true) || it.first.packageName.startsWith("com.uc.browser", true) }
                 ?: candidates.firstOrNull()
+            val now = SystemClock.elapsedRealtime()
             val accessibilityFreshNow = accessibilityPositionMs >= 0L &&
-                SystemClock.elapsedRealtime() - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
-            // Prefer the browser's directly observed seek position briefly after a seek.
-            // MediaSession can report its previous position for a moment while UC updates.
-            if (selected != null && !accessibilityFreshNow) {
+                now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
+            val sessionPosition = selected?.let { (_, state) ->
+                state.position + if (state.state == PlaybackState.STATE_PLAYING)
+                    (now - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
+            }
+            val sessionRecentlyUpdated = selected?.let { (_, state) ->
+                now - state.lastPositionUpdateTime in 0L..1_500L
+            } == true
+            val sessionShowsSeek = sessionPosition != null && accessibilityFreshNow &&
+                kotlin.math.abs(sessionPosition - accessibilityPositionMs) > 2_000L
+            // A freshly updated MediaSession that jumps far from the cached OCR estimate
+            // is likely reporting a new seek. Use it immediately instead of waiting for OCR.
+            if (selected != null && (!accessibilityFreshNow || (sessionRecentlyUpdated && sessionShowsSeek))) {
                 val (controller, state) = selected
-                val elapsed = if (state.state == PlaybackState.STATE_PLAYING)
-                    (SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
-                manualPositionMs = state.position + elapsed
+                manualPositionMs = sessionPosition ?: state.position
                 val stateLabel = if (state.state == PlaybackState.STATE_PLAYING) "PLAY" else "PAUSE"
                 updateSyncStatus("MediaSession: ${controller.packageName} · $stateLabel · ${manualPositionMs / 1000}s")
                 renderSubtitle()
             } else {
-                val now = SystemClock.elapsedRealtime()
                 val accessFresh = accessibilityPositionMs >= 0L && now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
                 if (accessFresh) {
                     val elapsed = if (accessibilityPlaying) (now - accessibilityUpdatedAtMs).coerceAtLeast(0L) else 0L
