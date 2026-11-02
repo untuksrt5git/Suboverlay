@@ -33,6 +33,13 @@ class MainActivity : Activity() {
             setPadding(0, 12, 0, 24)
         })
         layout.addView(Button(this).apply {
+            text = "Aktifkan sinkronisasi video"
+            setOnClickListener {
+                Toast.makeText(this@MainActivity, "Aktifkan akses notifikasi Suboverlay untuk membaca sesi media Android.", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+        })
+        layout.addView(Button(this).apply {
             text = "Pilih file subtitle (.srt)"
             setOnClickListener {
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
