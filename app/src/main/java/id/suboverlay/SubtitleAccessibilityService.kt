@@ -24,6 +24,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private var lastPositionChangeAt = 0L
     private var lastPositionObservedAt = 0L
     private var lastKnownPlaying = false
+    private var lastPlaybackDirection = 1L
     private var screenshotInProgress = false
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
     private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -118,7 +119,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
             lastPosition = positionMs
             lastPositionObservedAt = now
             lastPositionChangeAt = now
-            lastKnownPlaying = delta > 0L
+            lastKnownPlaying = true
+            lastPlaybackDirection = if (delta < 0L) -1L else 1L
         } else if (now - lastPositionChangeAt >= PLAYING_WINDOW_MS) {
             lastKnownPlaying = false
             lastPosition = positionMs
@@ -134,7 +136,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
         if (lastPosition < 0L) return
         val now = SystemClock.elapsedRealtime()
         val estimated = if (lastKnownPlaying) {
-            lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L)
+            (lastPosition + (now - lastPositionObservedAt).coerceAtLeast(0L) * lastPlaybackDirection).coerceAtLeast(0L)
         } else {
             lastPosition
         }
