@@ -28,6 +28,7 @@ class SubtitleOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlay: LinearLayout? = null
     private var subtitleView: TextView? = null
+    private var syncStatusView: TextView? = null
     private var cues: List<SubtitleCue> = emptyList()
     private var manualPositionMs = 0L
     private var manualOffsetMs = 0L
@@ -75,21 +76,19 @@ class SubtitleOverlayService : Service() {
             this.text = "Suboverlay siap"
         }
         subtitleView = text
+        syncStatusView = TextView(this).apply {
+            setTextColor(0xFFBDBDBD.toInt()); textSize = 10f; gravity = Gravity.CENTER
+            setPadding(8, 2, 8, 4); this.text = "Memeriksa sesi video…"
+        }
 
         fun makeControlRow(): LinearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
         fun addControl(row: LinearLayout, label: String, action: () -> Unit) {
             row.addView(Button(this).apply {
-                this.text = label
-                textSize = 11f
-                minWidth = 0
-                setPadding(2, 0, 2, 0)
+                this.text = label; textSize = 11f; minWidth = 0; setPadding(2, 0, 2, 0)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 setOnClickListener { action() }
             })
@@ -100,12 +99,14 @@ class SubtitleOverlayService : Service() {
             if (!fallbackRunning) {
                 fallbackStartedAtMs = SystemClock.elapsedRealtime() - manualPositionMs
                 fallbackRunning = true
+                updateSyncStatus("Jam manual berjalan (tidak mengikuti video)")
             }
         }
         addControl(playbackControls, "Jeda") {
             if (fallbackRunning) {
                 manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
                 fallbackRunning = false
+                updateSyncStatus("Jam manual dijeda")
                 renderSubtitle()
             }
         }
@@ -118,32 +119,21 @@ class SubtitleOverlayService : Service() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xCC111111.toInt())
-            addView(text)
-            addView(playbackControls)
-            addView(adjustmentControls)
+            addView(text); addView(syncStatusView); addView(playbackControls); addView(adjustmentControls)
         }
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; y = 90 }
-        // Drag the subtitle text area to move the floating panel.
         var downX = 0f
         var downY = 0f
         var startX = 0
         var startY = 0
         text.setOnTouchListener { _, event ->
             when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.rawX
-                    downY = event.rawY
-                    startX = params.x
-                    startY = params.y
-                    true
-                }
+                MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY; startX = params.x; startY = params.y; true }
                 MotionEvent.ACTION_MOVE -> {
                     params.x = startX + (event.rawX - downX).toInt()
                     params.y = startY - (event.rawY - downY).toInt()
@@ -165,20 +155,38 @@ class SubtitleOverlayService : Service() {
         try {
             val manager = getSystemService(MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
             val sessions = manager.getActiveSessions(ComponentName(this, SessionAccessService::class.java))
-            val state = sessions.firstNotNullOfOrNull { session ->
-                session.playbackState?.takeIf { it.position >= 0L &&
-                    (it.state == PlaybackState.STATE_PLAYING || it.state == PlaybackState.STATE_PAUSED) }
+            val candidates = sessions.mapNotNull { controller ->
+                val state = controller.playbackState ?: return@mapNotNull null
+                if (state.position < 0L || (state.state != PlaybackState.STATE_PLAYING && state.state != PlaybackState.STATE_PAUSED)) return@mapNotNull null
+                controller to state
             }
-            if (state != null) {
+            val selected = candidates.firstOrNull { it.first.packageName.startsWith("com.UCMobile", true) || it.first.packageName.startsWith("com.uc.browser", true) }
+                ?: candidates.firstOrNull()
+            if (selected != null) {
+                val (controller, state) = selected
                 val elapsed = if (state.state == PlaybackState.STATE_PLAYING)
                     (SystemClock.elapsedRealtime() - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
                 manualPositionMs = state.position + elapsed
+                val stateLabel = if (state.state == PlaybackState.STATE_PLAYING) "PLAY" else "PAUSE"
+                updateSyncStatus("MediaSession: ${controller.packageName} · $stateLabel · ${manualPositionMs / 1000}s")
                 renderSubtitle()
-            } else if (fallbackRunning) {
-                manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
-                renderSubtitle()
+            } else {
+                val packageList = sessions.map { it.packageName }.distinct().take(3).joinToString()
+                updateSyncStatus(if (packageList.isBlank()) "MediaSession UC: tidak terdeteksi" else "Sesi lain: $packageList")
+                if (fallbackRunning) {
+                    manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
+                    renderSubtitle()
+                }
             }
-        } catch (_: Exception) { }
+        } catch (_: SecurityException) {
+            updateSyncStatus("Akses MediaSession ditolak — periksa Akses notifikasi")
+        } catch (_: Exception) {
+            updateSyncStatus("Gagal membaca MediaSession")
+        }
+    }
+
+    private fun updateSyncStatus(message: String) {
+        syncStatusView?.text = message
     }
 
     private fun renderSubtitle() {
@@ -188,22 +196,19 @@ class SubtitleOverlayService : Service() {
 
     private fun stopOverlay() {
         overlay?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
-        overlay = null; subtitleView = null
+        overlay = null; subtitleView = null; syncStatusView = null
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Suboverlay", NotificationManager.IMPORTANCE_LOW)
-            )
-        }
+        if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Suboverlay", NotificationManager.IMPORTANCE_LOW)
+        )
     }
 
     private fun buildNotification(): Notification {
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID)
         else @Suppress("DEPRECATION") Notification.Builder(this)
-        return builder.setContentTitle("Suboverlay aktif")
-            .setContentText("Subtitle mengambang sedang berjalan")
+        return builder.setContentTitle("Suboverlay aktif").setContentText("Subtitle mengambang sedang berjalan")
             .setSmallIcon(android.R.drawable.ic_media_play).setOngoing(true).build()
     }
 
