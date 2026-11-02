@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
@@ -42,6 +43,13 @@ class SubtitleOverlayService : Service() {
     private var accessibilityDiagnostic = "menunggu data browser"
     private var subtitleTextSizeSp = 19f
     private var overlayBackgroundAlpha = 204
+    private var dragMode = false
+    private var dragStartRawX = 0f
+    private var dragStartRawY = 0f
+    private var dragStartX = 0
+    private var dragStartY = 0
+    private var subtitleParams: WindowManager.LayoutParams? = null
+    private val overlayPrefs by lazy { getSharedPreferences("overlay_settings", MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
     private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
 
@@ -78,12 +86,14 @@ class SubtitleOverlayService : Service() {
 
     private fun showOverlay() {
         if (overlay != null) return
+        subtitleTextSizeSp = overlayPrefs.getFloat("text_size", subtitleTextSizeSp).coerceIn(12f, 40f)
+        overlayBackgroundAlpha = overlayPrefs.getInt("background_alpha", overlayBackgroundAlpha).coerceIn(60, 255)
         val text = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = subtitleTextSizeSp
             gravity = Gravity.CENTER
             setPadding(dp(14), dp(6), dp(14), dp(6))
-            setBackgroundColor(Color.TRANSPARENT)
+            setBackgroundColor(Color.argb(overlayBackgroundAlpha, 17, 17, 17))
             this.text = "Suboverlay siap"
         }
         subtitleView = text
@@ -101,14 +111,20 @@ class SubtitleOverlayService : Service() {
             setBackgroundColor(Color.TRANSPARENT)
         }
         val subtitleParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; y = dp(70) }
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            x = overlayPrefs.getInt("x", 0)
+            y = overlayPrefs.getInt("y", dp(70))
+        }
+        subtitleParams = subtitleParams
+        root.setOnTouchListener { _, event -> handleOverlayTouch(event) }
 
         try {
             windowManager.addView(root, subtitleParams)
@@ -175,6 +191,7 @@ class SubtitleOverlayService : Service() {
         addControl(appearance, "Op−") { adjustBackgroundAlpha(-20) }
         addControl(appearance, "Op+") { adjustBackgroundAlpha(20) }
         val actions = row()
+        addControl(actions, "Geser subtitle") { toggleDragMode() }
         addControl(actions, "Tutup panel") { toggleControlPanel() }
         addControl(actions, "Matikan") { stopOverlay(); stopSelf() }
         panel.addView(sync)
@@ -239,12 +256,51 @@ class SubtitleOverlayService : Service() {
     private fun adjustTextSize(deltaSp: Float) {
         subtitleTextSizeSp = (subtitleTextSizeSp + deltaSp).coerceIn(12f, 40f)
         subtitleView?.textSize = subtitleTextSizeSp
+        overlayPrefs.edit().putFloat("text_size", subtitleTextSizeSp).apply()
     }
 
     private fun adjustBackgroundAlpha(delta: Int) {
         overlayBackgroundAlpha = (overlayBackgroundAlpha + delta).coerceIn(60, 255)
         val color = Color.argb(overlayBackgroundAlpha, 17, 17, 17)
-        subtitleView?.setBackgroundColor(Color.TRANSPARENT)
+        subtitleView?.setBackgroundColor(color)
+        overlayPrefs.edit().putInt("background_alpha", overlayBackgroundAlpha).apply()
+    }
+
+    private fun toggleDragMode() {
+        val params = subtitleParams ?: return
+        dragMode = !dragMode
+        params.flags = if (dragMode) {
+            params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        try { windowManager.updateViewLayout(overlay, params) } catch (_: Exception) { }
+        android.widget.Toast.makeText(this, if (dragMode) "Mode geser aktif: tarik teks subtitle" else "Mode geser nonaktif", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun handleOverlayTouch(event: MotionEvent): Boolean {
+        if (!dragMode) return false
+        val params = subtitleParams ?: return false
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                dragStartRawX = event.rawX
+                dragStartRawY = event.rawY
+                dragStartX = params.x
+                dragStartY = params.y
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                params.x = dragStartX + (event.rawX - dragStartRawX).toInt()
+                params.y = dragStartY - (event.rawY - dragStartRawY).toInt()
+                try { windowManager.updateViewLayout(overlay, params) } catch (_: Exception) { }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                overlayPrefs.edit().putInt("x", params.x).putInt("y", params.y).apply()
+                return true
+            }
+        }
+        return true
     }
 
     private fun updateSyncStatus(message: String) {
@@ -262,7 +318,7 @@ class SubtitleOverlayService : Service() {
         controlHandle?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         controlHandle = null
         overlay?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
-        overlay = null; subtitleView = null; syncStatusView = null
+        overlay = null; subtitleParams = null; dragMode = false; subtitleView = null; syncStatusView = null
     }
 
     private fun createNotificationChannel() {
