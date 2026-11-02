@@ -40,6 +40,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        currentInstance = this
         handler.removeCallbacks(poll)
         handler.post(poll)
     }
@@ -325,16 +326,35 @@ class SubtitleAccessibilityService : AccessibilityService() {
         return -1L
     }
 
+    /** Clear the old OCR time anchor after MediaSession confirms a seek. */
+    private fun resetPositionAnchor() {
+        lastPosition = -1L
+        lastPositionChangeAt = 0L
+        lastPositionObservedAt = 0L
+        lastKnownPlaying = false
+        lastPlaybackDirection = 1L
+    }
+
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         screenshotExecutor.shutdown()
         textRecognizer.close()
+        if (currentInstance === this) currentInstance = null
         super.onDestroy()
     }
 
     companion object {
+        @Volatile private var currentInstance: SubtitleAccessibilityService? = null
+
+        fun resetPositionCache() {
+            currentInstance?.let { service ->
+                service.resetPositionAnchor()
+                SubtitleOverlayService.clearAccessibilityPosition()
+            }
+        }
+
         private const val POLL_INTERVAL_MS = 1_000L
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
