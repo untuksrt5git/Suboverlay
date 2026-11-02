@@ -42,11 +42,13 @@ class SubtitleAccessibilityService : AccessibilityService() {
             if (roots.isEmpty()) rootInActiveWindow?.let { roots.add(it) }
             var seenPackage = ""
             var rangeCount = 0
+            val candidates = linkedSetOf<String>()
             for (root in roots) {
                 val packageName = root.packageName?.toString().orEmpty()
                 if (!isUcBrowser(packageName)) continue
                 seenPackage = packageName
                 rangeCount += countRangeNodes(root, 0)
+                collectControlDiagnostics(root, 0, candidates)
                 val position = findSeekPosition(root, 0)
                 if (position >= 0L) {
                     val now = SystemClock.elapsedRealtime()
@@ -60,8 +62,10 @@ class SubtitleAccessibilityService : AccessibilityService() {
                     return
                 }
             }
-            val message = if (seenPackage.isNotBlank()) seenPackage + " · RangeInfo: " + rangeCount + " · seekbar tidak tersedia"
-                else "Jendela UC Browser tidak terlihat · windows: " + roots.size
+            val message = if (seenPackage.isNotBlank()) {
+                seenPackage + " · RangeInfo: " + rangeCount +
+                    " · kontrol: " + if (candidates.isEmpty()) "tidak diekspos" else candidates.joinToString(" | ")
+            } else "Jendela UC Browser tidak terlihat · windows: " + roots.size
             SubtitleOverlayService.updateAccessibilityDiagnostic(message)
         } catch (_: Exception) {
             SubtitleOverlayService.updateAccessibilityDiagnostic("Gagal membaca pohon Accessibility")
@@ -79,6 +83,38 @@ class SubtitleAccessibilityService : AccessibilityService() {
         }
         return count
     }
+    /**
+     * UC may expose its floating-player controls as buttons/text descriptions rather than
+     * RangeInfo seekbars. Keep a small, UC-only sample to diagnose what Android exposes.
+     */
+    private fun collectControlDiagnostics(
+        node: AccessibilityNodeInfo,
+        depth: Int,
+        output: MutableSet<String>
+    ) {
+        if (depth > MAX_DEPTH || output.size >= MAX_DIAGNOSTIC_NODES) return
+        val className = node.className?.toString().orEmpty().substringAfterLast('.')
+        val text = node.text?.toString()?.trim().orEmpty()
+        val description = node.contentDescription?.toString()?.trim().orEmpty()
+        val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
+        val searchable = (text + " " + description + " " + viewId + " " + className).lowercase()
+        val looksRelevant = node.isClickable || node.isScrollable ||
+            listOf("seek", "progress", "play", "pause", "time", "duration", "video", "slider").any { searchable.contains(it) }
+        if (looksRelevant) {
+            val details = listOf(className, viewId, description.ifBlank { text })
+                .filter { it.isNotBlank() }
+                .joinToString(":")
+                .replace(Regex("\\s+"), " ")
+                .take(72)
+            if (details.isNotBlank()) output.add(details)
+        }
+        for (index in 0 until node.childCount) {
+            if (output.size >= MAX_DIAGNOSTIC_NODES) break
+            val child = node.getChild(index) ?: continue
+            try { collectControlDiagnostics(child, depth + 1, output) } finally { child.recycle() }
+        }
+    }
+
     private fun isUcBrowser(packageName: String): Boolean =
         packageName.startsWith("com.UCMobile", ignoreCase = true) ||
             packageName.startsWith("com.uc.browser", ignoreCase = true)
@@ -128,6 +164,6 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
-        private const val MAX_DEPTH = 25
+        private const val MAX_DEPTH = 25\n        private const val MAX_DIAGNOSTIC_NODES = 6
     }
 }
