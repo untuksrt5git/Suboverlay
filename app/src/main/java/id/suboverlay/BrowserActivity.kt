@@ -31,11 +31,14 @@ class BrowserActivity : Activity() {
                     val raw = if (result == null || result == "null") "" else org.json.JSONTokener(result).nextValue() as? String ?: ""
                     if (raw.isNotBlank()) {
                         val data = JSONObject(raw)
-                        val seconds = data.optDouble("time", -1.0)
-                        if (seconds >= 0.0 && seconds.isFinite()) {
-                            val playing = data.optBoolean("playing", false)
+                        val video = data.optJSONObject("best")
+                        val seconds = video?.optDouble("time", -1.0) ?: -1.0
+                        if (video != null && seconds >= 0.0 && seconds.isFinite()) {
+                            val playing = video.optBoolean("playing", false)
                             SubtitleOverlayService.updateWebViewPosition((seconds * 1000.0).toLong(), playing)
                             status.text = "Video terdeteksi · ${seconds.toInt()}s · ${if (playing) "PLAY" else "PAUSE"}"
+                        } else {
+                            status.text = "Belum ada video · ${data.optInt("frames", 0)} frame diperiksa"
                         }
                     } else {
                         status.text = "Mencari elemen video di halaman…"
