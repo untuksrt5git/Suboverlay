@@ -361,6 +361,15 @@ class SubtitleOverlayService : Service() {
             currentInstance?.let { it.accessibilityDiagnostic = message }
         }
 
+        fun resetAccessibilitySyncForOrientation(message: String) {
+            currentInstance?.let { service ->
+                service.accessibilityPositionMs = -1L
+                service.accessibilityUpdatedAtMs = 0L
+                service.accessibilityPlaying = false
+                service.accessibilityDiagnostic = message
+            }
+        }
+
         fun updateAccessibilityPosition(positionMs: Long, playing: Boolean) {
             currentInstance?.let { service ->
                 service.accessibilityPositionMs = positionMs
