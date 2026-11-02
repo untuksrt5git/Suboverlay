@@ -9,8 +9,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 
 /**
- * Reads the real seekbar range exposed by UC Browser's Android accessibility tree.
- * It deliberately ignores ordinary time labels because they may be duration/ad timers.
+ * Reads UC Browser playback position from a seekbar, or from paired elapsed/duration
+ * labels when the player does not expose a RangeInfo seekbar.
  */
 class SubtitleAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
@@ -49,8 +49,10 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 seenPackage = packageName
                 rangeCount += countRangeNodes(root, 0)
                 collectControlDiagnostics(root, 0, candidates)
-                val position = findSeekPosition(root, 0)
-                if (position >= 0L) {
+                // Prefer a real seekbar; some UC player versions expose only time labels.
+                val position = findSeekPosition(root, 0).takeIf { it >= 0L }
+                    ?: findPositionFromTimeLabels(root)
+                if (position != null && position >= 0L) {
                     val now = SystemClock.elapsedRealtime()
                     if (lastPosition < 0L || kotlin.math.abs(position - lastPosition) >= POSITION_CHANGE_THRESHOLD_MS) {
                         lastPosition = position
@@ -64,7 +66,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
             }
             val message = if (seenPackage.isNotBlank()) {
                 seenPackage + " · RangeInfo: " + rangeCount +
-                    " · kontrol: " + if (candidates.isEmpty()) "tidak diekspos" else candidates.joinToString(" | ")
+                    " · kontrol: " + if (candidates.isEmpty()) "tidak diekspos" else candidates.joinToString(" | ") +
+                    " · waktu video belum terbaca"
             } else "Jendela UC Browser tidak terlihat · windows: " + roots.size
             SubtitleOverlayService.updateAccessibilityDiagnostic(message)
         } catch (_: Exception) {
@@ -115,6 +118,44 @@ class SubtitleAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Fallback for UC player layouts that draw a timeline but expose no SeekBar/RangeInfo.
+     * It reads the elapsed-time and total-duration labels visible in the player.
+     */
+    private fun findPositionFromTimeLabels(root: AccessibilityNodeInfo): Long? {
+        val values = mutableListOf<Long>()
+        collectTimeLabels(root, 0, values)
+        val distinct = values.distinct().sorted()
+        if (distinct.size < 2) return null
+
+        val duration = distinct.last()
+        val elapsed = distinct.first()
+        if (duration < MIN_VIDEO_DURATION_MS || duration > MAX_VIDEO_MS) return null
+        if (elapsed >= duration || duration - elapsed < MIN_DURATION_GAP_MS) return null
+        return elapsed
+    }
+
+    private fun collectTimeLabels(node: AccessibilityNodeInfo, depth: Int, output: MutableList<Long>) {
+        if (depth > MAX_DEPTH || output.size >= MAX_TIME_LABELS) return
+        parseVideoTime(node.text?.toString())?.let { output.add(it) }
+        parseVideoTime(node.contentDescription?.toString())?.let { output.add(it) }
+        for (index in 0 until node.childCount) {
+            if (output.size >= MAX_TIME_LABELS) break
+            val child = node.getChild(index) ?: continue
+            try { collectTimeLabels(child, depth + 1, output) } finally { child.recycle() }
+        }
+    }
+
+    private fun parseVideoTime(raw: String?): Long? {
+        val value = raw?.trim() ?: return null
+        val match = VIDEO_TIME_REGEX.matchEntire(value) ?: return null
+        val hours = match.groupValues[1].takeIf { it.isNotEmpty() }?.toLongOrNull() ?: 0L
+        val minutes = match.groupValues[2].toLongOrNull() ?: return null
+        val seconds = match.groupValues[3].toLongOrNull() ?: return null
+        if (minutes > 59L || seconds > 59L) return null
+        val total = (hours * 3600L + minutes * 60L + seconds) * 1000L
+        return total.takeIf { it in 0..MAX_VIDEO_MS }
+    }
     private fun isUcBrowser(packageName: String): Boolean =
         packageName.startsWith("com.UCMobile", ignoreCase = true) ||
             packageName.startsWith("com.uc.browser", ignoreCase = true)
@@ -164,6 +205,10 @@ class SubtitleAccessibilityService : AccessibilityService() {
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val MAX_VIDEO_MS = 24L * 60L * 60L * 1000L
+        private const val MIN_VIDEO_DURATION_MS = 10L * 60L * 1000L
+        private const val MIN_DURATION_GAP_MS = 60L * 1000L
+        private const val MAX_TIME_LABELS = 24
+        private val VIDEO_TIME_REGEX = Regex("""^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})$""")
         private const val MAX_DEPTH = 25
         private const val MAX_DIAGNOSTIC_NODES = 6
     }
