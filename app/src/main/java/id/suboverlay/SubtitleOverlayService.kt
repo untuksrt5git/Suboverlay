@@ -92,7 +92,12 @@ class SubtitleOverlayService : Service() {
             setTextColor(Color.WHITE)
             textSize = subtitleTextSizeSp
             gravity = Gravity.CENTER
-            setPadding(dp(14), dp(6), dp(14), dp(6))
+            minLines = 2
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            includeFontPadding = false
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            layoutParams = LinearLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.90f).toInt(), WindowManager.LayoutParams.WRAP_CONTENT)
             setBackgroundColor(Color.argb(overlayBackgroundAlpha, 17, 17, 17))
             this.text = "Suboverlay siap"
         }
@@ -107,7 +112,6 @@ class SubtitleOverlayService : Service() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
             addView(text)
-            addView(syncStatusView)
             setBackgroundColor(Color.TRANSPARENT)
         }
         val layoutParams = WindowManager.LayoutParams(
