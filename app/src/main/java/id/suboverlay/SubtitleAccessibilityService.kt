@@ -54,6 +54,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private fun captureScreenForTime() {
         if (screenshotInProgress) return
         screenshotInProgress = true
+        val screenshotCapturedAt = SystemClock.elapsedRealtime()
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
@@ -75,7 +76,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                     val elapsed = times.first()
                                     if (duration >= MIN_VIDEO_DURATION_MS && duration <= MAX_VIDEO_MS &&
                                         elapsed < duration && duration - elapsed >= MIN_DURATION_GAP_MS) {
-                                        recordPosition(elapsed)
+                                        recordPosition(elapsed, screenshotCapturedAt)
                                         SubtitleOverlayService.updateAccessibilityDiagnostic(
                                             "OCR layar · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
                                         )
@@ -106,18 +107,23 @@ class SubtitleAccessibilityService : AccessibilityService() {
      * Cache the last confirmed video time. Movement means playback is active;
      * repeated identical readings for a short grace period indicate pause.
      */
-    private fun recordPosition(positionMs: Long) {
+    private fun recordPosition(
+        positionMs: Long,
+        observedAtMs: Long = SystemClock.elapsedRealtime()
+    ) {
         val now = SystemClock.elapsedRealtime()
         if (lastPosition < 0L) {
             lastPosition = positionMs
-            lastPositionObservedAt = now
+            lastPositionObservedAt = observedAtMs
             lastPositionChangeAt = now
             return
         }
         val delta = positionMs - lastPosition
         if (kotlin.math.abs(delta) >= POSITION_CHANGE_THRESHOLD_MS) {
             lastPosition = positionMs
-            lastPositionObservedAt = now
+            // Anchor the clock to when the frame was captured, not when OCR
+            // finished. This prevents OCR processing delay accumulating as drift.
+            lastPositionObservedAt = observedAtMs
             lastPositionChangeAt = now
             lastKnownPlaying = true
             lastPlaybackDirection = if (delta < 0L) -1L else 1L
