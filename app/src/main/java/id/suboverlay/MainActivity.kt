@@ -46,7 +46,6 @@ class MainActivity : Activity() {
             }
         }
         layout.addView(syncButton)
-        layout.addView(Button(this).apply { text = "Coba browser Suboverlay (eksperimen)"; setOnClickListener { startActivity(Intent(this@MainActivity, BrowserActivity::class.java)) } })
         accessibilityButton = Button(this).apply {
             setOnClickListener {
                 Toast.makeText(this@MainActivity, "Pastikan layanan Suboverlay Video Position diaktifkan.", Toast.LENGTH_LONG).show()
