@@ -26,6 +26,7 @@ import java.io.InputStreamReader
 
 class SubtitleOverlayService : Service() {
     private lateinit var windowManager: WindowManager
+    init { currentInstance = this }
     private var overlay: LinearLayout? = null
     private var subtitleView: TextView? = null
     private var syncStatusView: TextView? = null
@@ -34,6 +35,9 @@ class SubtitleOverlayService : Service() {
     private var manualOffsetMs = 0L
     private var fallbackStartedAtMs = 0L
     private var fallbackRunning = false
+    private var accessibilityPositionMs = -1L
+    private var accessibilityUpdatedAtMs = 0L
+    private var accessibilityPlaying = false
     private val handler = Handler(Looper.getMainLooper())
     private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
 
@@ -171,11 +175,20 @@ class SubtitleOverlayService : Service() {
                 updateSyncStatus("MediaSession: ${controller.packageName} · $stateLabel · ${manualPositionMs / 1000}s")
                 renderSubtitle()
             } else {
-                val packageList = sessions.map { it.packageName }.distinct().take(3).joinToString()
-                updateSyncStatus(if (packageList.isBlank()) "MediaSession UC: tidak terdeteksi" else "Sesi lain: $packageList")
-                if (fallbackRunning) {
-                    manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
+                val now = SystemClock.elapsedRealtime()
+                val accessFresh = accessibilityPositionMs >= 0L && now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
+                if (accessFresh) {
+                    val elapsed = if (accessibilityPlaying) (now - accessibilityUpdatedAtMs).coerceAtLeast(0L) else 0L
+                    manualPositionMs = accessibilityPositionMs + elapsed
+                    updateSyncStatus("Accessibility seekbar · ${if (accessibilityPlaying) "PLAY" else "PAUSE"} · ${manualPositionMs / 1000}s")
                     renderSubtitle()
+                } else {
+                    val packageList = sessions.map { it.packageName }.distinct().take(3).joinToString()
+                    updateSyncStatus(if (packageList.isBlank()) "MediaSession/seekbar belum terdeteksi" else "Sesi lain: $packageList · seekbar tidak terbaca")
+                    if (fallbackRunning) {
+                        manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
+                        renderSubtitle()
+                    }
                 }
             }
         } catch (_: SecurityException) {
@@ -212,10 +225,22 @@ class SubtitleOverlayService : Service() {
             .setSmallIcon(android.R.drawable.ic_media_play).setOngoing(true).build()
     }
 
-    override fun onDestroy() { handler.removeCallbacks(syncTask); stopOverlay(); super.onDestroy() }
+    override fun onDestroy() { handler.removeCallbacks(syncTask); stopOverlay(); if (currentInstance === this) currentInstance = null; super.onDestroy() }
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        private const val ACCESSIBILITY_FRESH_MS = 2_000L
+
+        @Volatile private var currentInstance: SubtitleOverlayService? = null
+
+        fun updateAccessibilityPosition(positionMs: Long, playing: Boolean) {
+            currentInstance?.let { service ->
+                service.accessibilityPositionMs = positionMs
+                service.accessibilityUpdatedAtMs = SystemClock.elapsedRealtime()
+                service.accessibilityPlaying = playing
+            }
+        }
+
         const val ACTION_START = "id.suboverlay.START"
         const val ACTION_STOP = "id.suboverlay.STOP"
         private const val CHANNEL_ID = "suboverlay_service"
