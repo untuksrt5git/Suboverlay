@@ -173,12 +173,19 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 val packageName = root.packageName?.toString().orEmpty()
                 if (!isUcBrowser(packageName)) continue
                 seenPackage = packageName
-                // Prefer a real seekbar; some UC player versions expose only time labels.
-                val position = findSeekPosition(root, 0).takeIf { it >= 0L }
+                // First obtain a plausible total duration from the player labels.
+                // A seekbar with a small numeric range (for example 0..100 or 0..1000)
+                // is a fraction/percentage, not milliseconds or seconds.
+                val duration = findVideoDuration(root)
+                val position = findSeekPosition(root, 0, duration).takeIf { it >= 0L }
                     ?: findPositionFromTimeLabels(root)
-                if (position != null && position >= 0L) {
+                if (position != null && position >= 0L &&
+                    (duration == null || position < duration)) {
                     recordPosition(position)
-                    SubtitleOverlayService.updateAccessibilityDiagnostic(packageName + " · posisi: " + (position / 1000) + "s")
+                    SubtitleOverlayService.updateAccessibilityDiagnostic(
+                        packageName + " · posisi: " + (position / 1000) + "s" +
+                            (duration?.let { " / ${it / 1000}s" } ?: "")
+                    )
                     return
                 }
             }
@@ -197,16 +204,27 @@ class SubtitleAccessibilityService : AccessibilityService() {
      * Fallback for UC player layouts that draw a timeline but expose no SeekBar/RangeInfo.
      * It reads the elapsed-time and total-duration labels visible in the player.
      */
+    private fun findVideoDuration(root: AccessibilityNodeInfo): Long? {
+        val values = mutableListOf<Long>()
+        collectTimeLabels(root, 0, values)
+        return values.distinct()
+            .filter { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }
+            .maxOrNull()
+    }
+
     private fun findPositionFromTimeLabels(root: AccessibilityNodeInfo): Long? {
         val values = mutableListOf<Long>()
         collectTimeLabels(root, 0, values)
         val distinct = values.distinct().sorted()
         if (distinct.size < 2) return null
 
-        val duration = distinct.last()
-        val elapsed = distinct.first()
-        if (duration < MIN_VIDEO_DURATION_MS || duration > MAX_VIDEO_MS) return null
-        if (elapsed >= duration || duration - elapsed < MIN_DURATION_GAP_MS) return null
+        // Only accept a pair that resembles elapsed + total duration.
+        // Short timestamps elsewhere on the page (for example "01:04") are
+        // not allowed to become the playback position by themselves.
+        val duration = distinct.lastOrNull { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }
+            ?: return null
+        val elapsed = distinct.firstOrNull { it < duration } ?: return null
+        if (duration - elapsed < MIN_DURATION_GAP_MS) return null
         return elapsed
     }
 
@@ -235,7 +253,11 @@ class SubtitleAccessibilityService : AccessibilityService() {
         packageName.startsWith("com.UCMobile", ignoreCase = true) ||
             packageName.startsWith("com.uc.browser", ignoreCase = true)
 
-    private fun findSeekPosition(node: AccessibilityNodeInfo, depth: Int): Long {
+    private fun findSeekPosition(
+        node: AccessibilityNodeInfo,
+        depth: Int,
+        durationMs: Long?
+    ): Long {
         if (depth > MAX_DEPTH) return -1L
 
         val range = node.rangeInfo
@@ -248,18 +270,25 @@ class SubtitleAccessibilityService : AccessibilityService() {
             val current = range.current
             if (looksLikeSeekBar && max > 0f && current >= 0f && current <= max) {
                 val valueMs = when {
+                    // Native players commonly expose milliseconds.
                     max > 100_000f -> current.toLong()
-                    max > 120f -> (current * 1000f).toLong()
+                    // Some players expose seconds as the range.
+                    max > 1_000f -> (current * 1000f).toLong()
+                    // Small ranges are usually a percentage/progress scale.
+                    // Convert only when a credible video duration is available.
+                    durationMs != null && max > 0f ->
+                        (current.toDouble() / max.toDouble() * durationMs.toDouble()).toLong()
                     else -> -1L
                 }
-                if (valueMs in 0..MAX_VIDEO_MS) return valueMs
+                if (valueMs in 0..MAX_VIDEO_MS &&
+                    (durationMs == null || valueMs < durationMs)) return valueMs
             }
         }
 
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue
             val result = try {
-                findSeekPosition(child, depth + 1)
+                findSeekPosition(child, depth + 1, durationMs)
             } finally {
                 child.recycle()
             }
