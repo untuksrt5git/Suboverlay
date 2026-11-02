@@ -375,6 +375,14 @@ class SubtitleOverlayService : Service() {
             }
         }
 
+        fun clearAccessibilityPosition() {
+            currentInstance?.let { service ->
+                service.accessibilityPositionMs = -1L
+                service.accessibilityUpdatedAtMs = 0L
+                service.accessibilityPlaying = false
+            }
+        }
+
         const val ACTION_START = "id.suboverlay.START"
         const val ACTION_STOP = "id.suboverlay.STOP"
         private const val CHANNEL_ID = "suboverlay_service"
