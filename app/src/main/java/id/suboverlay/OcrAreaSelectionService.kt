@@ -31,19 +31,21 @@ class OcrAreaSelectionService : Service() {
         val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         orientationKey = if (landscape) "landscape" else "portrait"
         val prefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
-        val top = if (landscape) .84f else .70f
-        val bottom = if (landscape) .94f else .77f
-        addBox("elapsed", "Waktu awal", load(prefs, "elapsed", RectF(.025f, top, .20f, bottom)))
-        addBox("duration", "Durasi total", load(prefs, "duration", RectF(.79f, top, .98f, bottom)))
+        val elapsedDefault = if (landscape) RectF(.02f, .72f, .10f, .81f)
+            else RectF(.13f, .47f, .25f, .54f)
+        val durationDefault = if (landscape) RectF(.81f, .72f, .91f, .81f)
+            else RectF(.65f, .47f, .78f, .54f)
+        addBox("elapsed", "Waktu awal", load(prefs, "elapsed", elapsedDefault))
+        addBox("duration", "Durasi total", load(prefs, "duration", durationDefault))
         addControls(prefs, landscape)
         return START_NOT_STICKY
     }
 
     private fun load(prefs: android.content.SharedPreferences, kind: String, d: RectF) = RectF(
-        prefs.getFloat("${orientationKey}_${kind}_left", d.left),
-        prefs.getFloat("${orientationKey}_${kind}_top", d.top),
-        prefs.getFloat("${orientationKey}_${kind}_right", d.right),
-        prefs.getFloat("${orientationKey}_${kind}_bottom", d.bottom)
+        prefs.getFloat("${orientationKey}_${kind}_v2_left", d.left),
+        prefs.getFloat("${orientationKey}_${kind}_v2_top", d.top),
+        prefs.getFloat("${orientationKey}_${kind}_v2_right", d.right),
+        prefs.getFloat("${orientationKey}_${kind}_v2_bottom", d.bottom)
     )
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -74,10 +76,10 @@ class OcrAreaSelectionService : Service() {
                 val e = prefs.edit()
                 views.forEach { (kind, view) ->
                     val r = view.normalized()
-                    e.putFloat("${orientationKey}_${kind}_left", r.left)
-                        .putFloat("${orientationKey}_${kind}_top", r.top)
-                        .putFloat("${orientationKey}_${kind}_right", r.right)
-                        .putFloat("${orientationKey}_${kind}_bottom", r.bottom)
+                    e.putFloat("${orientationKey}_${kind}_v2_left", r.left)
+                        .putFloat("${orientationKey}_${kind}_v2_top", r.top)
+                        .putFloat("${orientationKey}_${kind}_v2_right", r.right)
+                        .putFloat("${orientationKey}_${kind}_v2_bottom", r.bottom)
                 }
                 val saved = e.commit()
                 Toast.makeText(
@@ -91,10 +93,12 @@ class OcrAreaSelectionService : Service() {
         row.addView(Button(this).apply {
             text = "Reset"
             setOnClickListener {
-                val t = if (landscape) .84f else .70f
-                val b = if (landscape) .94f else .77f
-                views["elapsed"]?.reset(RectF(.025f, t, .20f, b))
-                views["duration"]?.reset(RectF(.79f, t, .98f, b))
+                val elapsedDefault = if (landscape) RectF(.02f, .72f, .10f, .81f)
+                    else RectF(.13f, .47f, .25f, .54f)
+                val durationDefault = if (landscape) RectF(.81f, .72f, .91f, .81f)
+                    else RectF(.65f, .47f, .78f, .54f)
+                views["elapsed"]?.reset(elapsedDefault)
+                views["duration"]?.reset(durationDefault)
             }
         })
         row.addView(Button(this).apply { text = "Batal"; setOnClickListener { stopSelf() } })
