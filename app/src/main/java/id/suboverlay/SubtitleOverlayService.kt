@@ -216,47 +216,53 @@ class SubtitleOverlayService : Service() {
         try {
             val manager = getSystemService(MEDIA_SESSION_SERVICE) as android.media.session.MediaSessionManager
             val sessions = manager.getActiveSessions(ComponentName(this, SessionAccessService::class.java))
-            val candidates = sessions.mapNotNull { controller ->
-                val state = controller.playbackState ?: return@mapNotNull null
-                if (state.position < 0L || (state.state != PlaybackState.STATE_PLAYING && state.state != PlaybackState.STATE_PAUSED)) return@mapNotNull null
-                controller to state
-            }
-            val selected = candidates.firstOrNull { it.first.packageName.startsWith("com.UCMobile", true) || it.first.packageName.startsWith("com.uc.browser", true) }
-                ?: candidates.firstOrNull()
             val now = SystemClock.elapsedRealtime()
-            val accessibilityFreshNow = accessibilityPositionMs >= 0L &&
-                now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
-            val sessionPosition = selected?.let { (_, state) ->
-                state.position + if (state.state == PlaybackState.STATE_PLAYING)
-                    (now - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
+
+            // Prefer UC Browser's MediaSession as the primary clock. Its position
+            // should jump immediately when the user seeks (e.g. fast-forward/back).
+            // Accessibility/OCR remains the fallback when UC exposes no usable session.
+            val ucSession = sessions.firstOrNull { controller ->
+                (controller.packageName.startsWith("com.UCMobile", true) ||
+                    controller.packageName.startsWith("com.uc.browser", true)) &&
+                    controller.playbackState?.let { state ->
+                        state.position >= 0L &&
+                            (state.state == PlaybackState.STATE_PLAYING ||
+                                state.state == PlaybackState.STATE_PAUSED)
+                    } == true
             }
-            val sessionRecentlyUpdated = selected?.let { (_, state) ->
-                now - state.lastPositionUpdateTime in 0L..1_500L
-            } == true
-            val sessionShowsSeek = sessionPosition != null && accessibilityFreshNow &&
-                kotlin.math.abs(sessionPosition - accessibilityPositionMs) > 2_000L
-            // A freshly updated MediaSession that jumps far from the cached OCR estimate
-            // is likely reporting a new seek. Use it immediately instead of waiting for OCR.
-            if (selected != null && (!accessibilityFreshNow || (sessionRecentlyUpdated && sessionShowsSeek))) {
-                val (controller, state) = selected
-                manualPositionMs = sessionPosition ?: state.position
+
+            if (ucSession != null) {
+                val state = ucSession.playbackState!!
+                val sessionPosition = state.position +
+                    if (state.state == PlaybackState.STATE_PLAYING)
+                        (now - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
+                manualPositionMs = sessionPosition.coerceIn(0L, 24L * 60L * 60L * 1000L)
                 val stateLabel = if (state.state == PlaybackState.STATE_PLAYING) "PLAY" else "PAUSE"
-                updateSyncStatus("MediaSession: ${controller.packageName} · $stateLabel · ${manualPositionMs / 1000}s")
+                updateSyncStatus("MediaSession UC (utama): $stateLabel · ${manualPositionMs / 1000}s")
+                renderSubtitle()
+                return
+            }
+
+            // No usable UC MediaSession: fall back to the browser accessibility
+            // clock, which itself can use visible labels/OCR.
+            val accessFresh = accessibilityPositionMs >= 0L &&
+                now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
+            if (accessFresh) {
+                val elapsed = if (accessibilityPlaying)
+                    (now - accessibilityUpdatedAtMs).coerceAtLeast(0L) else 0L
+                manualPositionMs = (accessibilityPositionMs + elapsed)
+                    .coerceIn(0L, 24L * 60L * 60L * 1000L)
+                updateSyncStatus("Accessibility/OCR (cadangan) · ${if (accessibilityPlaying) "PLAY" else "PAUSE"} · ${manualPositionMs / 1000}s")
                 renderSubtitle()
             } else {
-                val accessFresh = accessibilityPositionMs >= 0L && now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
-                if (accessFresh) {
-                    val elapsed = if (accessibilityPlaying) (now - accessibilityUpdatedAtMs).coerceAtLeast(0L) else 0L
-                    manualPositionMs = accessibilityPositionMs + elapsed
-                    updateSyncStatus("Accessibility seekbar · ${if (accessibilityPlaying) "PLAY" else "PAUSE"} · ${manualPositionMs / 1000}s")
+                val packageList = sessions.map { it.packageName }.distinct().take(3).joinToString()
+                updateSyncStatus(
+                    (if (packageList.isBlank()) "MediaSession UC belum terdeteksi" else "Sesi aktif: $packageList · posisi UC belum terbaca") +
+                        "\nA11y/OCR: " + accessibilityDiagnostic
+                )
+                if (fallbackRunning) {
+                    manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
                     renderSubtitle()
-                } else {
-                    val packageList = sessions.map { it.packageName }.distinct().take(3).joinToString()
-                    updateSyncStatus((if (packageList.isBlank()) "MediaSession/seekbar belum terdeteksi" else "Sesi lain: $packageList · seekbar tidak terbaca") + "\nA11y: " + accessibilityDiagnostic)
-                    if (fallbackRunning) {
-                        manualPositionMs = (SystemClock.elapsedRealtime() - fallbackStartedAtMs).coerceAtLeast(0L)
-                        renderSubtitle()
-                    }
                 }
             }
         } catch (_: SecurityException) {
