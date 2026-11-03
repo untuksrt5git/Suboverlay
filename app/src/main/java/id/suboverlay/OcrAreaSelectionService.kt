@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Point
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.os.IBinder
@@ -48,19 +49,33 @@ class OcrAreaSelectionService : Service() {
         prefs.getFloat("${orientationKey}_${kind}_v3_bottom", d.bottom)
     )
 
+    private fun fullScreenSize(): Point {
+        val point = Point()
+        @Suppress("DEPRECATION")
+        (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealSize(point)
+        if (point.x <= 0 || point.y <= 0) {
+            point.x = resources.displayMetrics.widthPixels
+            point.y = resources.displayMetrics.heightPixels
+        }
+        return point
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun addBox(kind: String, label: String, r: RectF) {
         val v = BoxView(kind, label)
-        val screenW = resources.displayMetrics.widthPixels
-        val screenH = resources.displayMetrics.heightPixels
+        val screen = fullScreenSize()
+        val screenW = screen.x
+        val screenH = screen.y
         val savedW = (r.width() * screenW).toInt().coerceIn(dp(44), dp(240))
         val savedH = (r.height() * screenH).toInt().coerceIn(dp(36), dp(120))
         val p = WindowManager.LayoutParams(savedW, savedH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT).apply {
-            gravity = Gravity.TOP or Gravity.START
+            gravity = Gravity.TOP or Gravity.LEFT
             x = (r.left * screenW).toInt().coerceIn(0, (screenW - savedW).coerceAtLeast(0))
             y = (r.top * screenH).toInt().coerceIn(0, (screenH - savedH).coerceAtLeast(0))
         }
@@ -108,7 +123,9 @@ class OcrAreaSelectionService : Service() {
         row.addView(Button(this).apply { text = "Batal"; setOnClickListener { stopSelf() } })
         val p = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(48) }
         controls = row
         wm.addView(row, p)
@@ -139,23 +156,29 @@ class OcrAreaSelectionService : Service() {
 
         fun normalized(): RectF {
             val p = layoutParams as WindowManager.LayoutParams
-            val w = resources.displayMetrics.widthPixels.toFloat(); val h = resources.displayMetrics.heightPixels.toFloat()
-            val boxW = p.width.coerceAtLeast(dp(1)).toFloat()
-            val boxH = p.height.coerceAtLeast(dp(1)).toFloat()
-            val left = (p.x / w).coerceIn(0f, .99f)
-            val top = (p.y / h).coerceIn(0f, .99f)
+            val screen = fullScreenSize()
+            val w = screen.x.toFloat().coerceAtLeast(1f)
+            val h = screen.y.toFloat().coerceAtLeast(1f)
+            val location = IntArray(2)
+            getLocationOnScreen(location)
+            val left = (location[0] / w).coerceIn(0f, .999f)
+            val top = (location[1] / h).coerceIn(0f, .999f)
             return RectF(
                 left,
                 top,
-                ((p.x + boxW) / w).coerceIn(left + .001f, 1f),
-                ((p.y + boxH) / h).coerceIn(top + .001f, 1f)
+                ((location[0] + width) / w).coerceIn(left + .001f, 1f),
+                ((location[1] + height) / h).coerceIn(top + .001f, 1f)
             )
         }
         fun reset(r: RectF) {
             val p = layoutParams as WindowManager.LayoutParams
-            p.x = (r.left * resources.displayMetrics.widthPixels).toInt()
-            p.y = (r.top * resources.displayMetrics.heightPixels).toInt()
-            p.width = (r.width() * resources.displayMetrics.widthPixels).toInt().coerceIn(dp(44), dp(240)); p.height = (r.height() * resources.displayMetrics.heightPixels).toInt().coerceIn(dp(36), dp(120)); wm.updateViewLayout(this, p)
+            val screen = fullScreenSize()
+            p.x = (r.left * screen.x).toInt().coerceIn(0, (screen.x - p.width).coerceAtLeast(0))
+            p.y = (r.top * screen.y).toInt().coerceIn(0, (screen.y - p.height).coerceAtLeast(0))
+            p.width = (r.width() * screen.x).toInt().coerceIn(dp(44), dp(240))
+            p.height = (r.height() * screen.y).toInt().coerceIn(dp(36), dp(120))
+            wm.updateViewLayout(this, p)
+            invalidate()
         }
         override fun onDraw(c: Canvas) {
             val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
@@ -184,8 +207,9 @@ class OcrAreaSelectionService : Service() {
                         p.width = (startWidth + dx).coerceIn(dp(44), dp(240))
                         p.height = (startHeight + dy).coerceIn(dp(36), dp(120))
                     } else {
-                        p.x = (startX + dx).coerceIn(0, (resources.displayMetrics.widthPixels - p.width).coerceAtLeast(0))
-                        p.y = (startY + dy).coerceIn(0, (resources.displayMetrics.heightPixels - p.height).coerceAtLeast(0))
+                        val screen = fullScreenSize()
+                        p.x = (startX + dx).coerceIn(0, (screen.x - p.width).coerceAtLeast(0))
+                        p.y = (startY + dy).coerceIn(0, (screen.y - p.height).coerceAtLeast(0))
                     }
                     wm.updateViewLayout(this, p)
                     invalidate()
