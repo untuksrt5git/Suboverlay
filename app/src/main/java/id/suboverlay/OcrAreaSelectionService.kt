@@ -31,10 +31,10 @@ class OcrAreaSelectionService : Service() {
         val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         orientationKey = if (landscape) "landscape" else "portrait"
         val prefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
-        val elapsedDefault = if (landscape) RectF(.02f, .72f, .10f, .81f)
-            else RectF(.13f, .47f, .25f, .54f)
-        val durationDefault = if (landscape) RectF(.81f, .72f, .91f, .81f)
-            else RectF(.65f, .47f, .78f, .54f)
+        val elapsedDefault = if (landscape) RectF(.02f, .81f, .10f, .865f)
+            else RectF(.145f, .235f, .275f, .275f)
+        val durationDefault = if (landscape) RectF(.905f, .81f, .985f, .865f)
+            else RectF(.735f, .235f, .845f, .275f)
         addBox("elapsed", "Waktu awal", load(prefs, "elapsed", elapsedDefault))
         addBox("duration", "Durasi total", load(prefs, "duration", durationDefault))
         addControls(prefs, landscape)
@@ -42,10 +42,10 @@ class OcrAreaSelectionService : Service() {
     }
 
     private fun load(prefs: android.content.SharedPreferences, kind: String, d: RectF) = RectF(
-        prefs.getFloat("${orientationKey}_${kind}_v2_left", d.left),
-        prefs.getFloat("${orientationKey}_${kind}_v2_top", d.top),
-        prefs.getFloat("${orientationKey}_${kind}_v2_right", d.right),
-        prefs.getFloat("${orientationKey}_${kind}_v2_bottom", d.bottom)
+        prefs.getFloat("${orientationKey}_${kind}_v3_left", d.left),
+        prefs.getFloat("${orientationKey}_${kind}_v3_top", d.top),
+        prefs.getFloat("${orientationKey}_${kind}_v3_right", d.right),
+        prefs.getFloat("${orientationKey}_${kind}_v3_bottom", d.bottom)
     )
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -54,8 +54,8 @@ class OcrAreaSelectionService : Service() {
         val v = BoxView(kind, label)
         val screenW = resources.displayMetrics.widthPixels
         val screenH = resources.displayMetrics.heightPixels
-        val savedW = (r.width() * screenW).toInt().coerceIn(dp(90), dp(240))
-        val savedH = (r.height() * screenH).toInt().coerceIn(dp(58), dp(120))
+        val savedW = (r.width() * screenW).toInt().coerceIn(dp(44), dp(240))
+        val savedH = (r.height() * screenH).toInt().coerceIn(dp(36), dp(120))
         val p = WindowManager.LayoutParams(savedW, savedH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -76,10 +76,10 @@ class OcrAreaSelectionService : Service() {
                 val e = prefs.edit()
                 views.forEach { (kind, view) ->
                     val r = view.normalized()
-                    e.putFloat("${orientationKey}_${kind}_v2_left", r.left)
-                        .putFloat("${orientationKey}_${kind}_v2_top", r.top)
-                        .putFloat("${orientationKey}_${kind}_v2_right", r.right)
-                        .putFloat("${orientationKey}_${kind}_v2_bottom", r.bottom)
+                    e.putFloat("${orientationKey}_${kind}_v3_left", r.left)
+                        .putFloat("${orientationKey}_${kind}_v3_top", r.top)
+                        .putFloat("${orientationKey}_${kind}_v3_right", r.right)
+                        .putFloat("${orientationKey}_${kind}_v3_bottom", r.bottom)
                 }
                 val saved = e.commit()
                 Toast.makeText(
@@ -144,7 +144,7 @@ class OcrAreaSelectionService : Service() {
             val p = layoutParams as WindowManager.LayoutParams
             p.x = (r.left * resources.displayMetrics.widthPixels).toInt()
             p.y = (r.top * resources.displayMetrics.heightPixels).toInt()
-            p.width = dp(150); p.height = dp(76); wm.updateViewLayout(this, p)
+            p.width = (r.width() * resources.displayMetrics.widthPixels).toInt().coerceIn(dp(44), dp(240)); p.height = (r.height() * resources.displayMetrics.heightPixels).toInt().coerceIn(dp(36), dp(120)); wm.updateViewLayout(this, p)
         }
         override fun onDraw(c: Canvas) {
             val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
