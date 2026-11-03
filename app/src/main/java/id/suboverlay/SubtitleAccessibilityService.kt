@@ -105,7 +105,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         // portrait is an embedded player in the page; landscape is fullscreen.
                         val elapsedDefault = if (isLandscape) RectF(.02f, .81f, .10f, .865f)
                             else RectF(.145f, .235f, .275f, .275f)
-                        val durationDefault = if (isLandscape) RectF(.72f, .76f, .995f, .93f)
+                        val durationDefault = if (isLandscape) RectF(.905f, .81f, .985f, .865f)
                             else RectF(.735f, .235f, .845f, .275f)
                         val elapsedCrop = cropFor("elapsed", elapsedDefault)
                         val durationCrop = cropFor("duration", durationDefault)
