@@ -50,13 +50,17 @@ class OcrAreaSelectionService : Service() {
 
     private fun addBox(kind: String, label: String, r: RectF) {
         val v = BoxView(kind, label)
-        val p = WindowManager.LayoutParams(dp(150), dp(76),
+        val screenW = resources.displayMetrics.widthPixels
+        val screenH = resources.displayMetrics.heightPixels
+        val savedW = (r.width() * screenW).toInt().coerceIn(dp(90), dp(240))
+        val savedH = (r.height() * screenH).toInt().coerceIn(dp(58), dp(120))
+        val p = WindowManager.LayoutParams(savedW, savedH,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (r.left * resources.displayMetrics.widthPixels).toInt()
-            y = (r.top * resources.displayMetrics.heightPixels).toInt()
+            x = (r.left * screenW).toInt().coerceIn(0, (screenW - savedW).coerceAtLeast(0))
+            y = (r.top * screenH).toInt().coerceIn(0, (screenH - savedH).coerceAtLeast(0))
         }
         wm.addView(v, p)
         views[kind] = v
@@ -75,8 +79,12 @@ class OcrAreaSelectionService : Service() {
                         .putFloat("${orientationKey}_${kind}_right", r.right)
                         .putFloat("${orientationKey}_${kind}_bottom", r.bottom)
                 }
-                e.apply()
-                Toast.makeText(this@OcrAreaSelectionService, "Dua area OCR tersimpan", Toast.LENGTH_SHORT).show()
+                val saved = e.commit()
+                Toast.makeText(
+                    this@OcrAreaSelectionService,
+                    if (saved) "Posisi dan ukuran area OCR tersimpan ($orientationKey)" else "Gagal menyimpan area OCR",
+                    Toast.LENGTH_SHORT
+                ).show()
                 stopSelf()
             }
         })
@@ -117,8 +125,16 @@ class OcrAreaSelectionService : Service() {
         fun normalized(): RectF {
             val p = layoutParams as WindowManager.LayoutParams
             val w = resources.displayMetrics.widthPixels.toFloat(); val h = resources.displayMetrics.heightPixels.toFloat()
-            return RectF((p.x / w).coerceIn(0f, .99f), (p.y / h).coerceIn(0f, .99f),
-                ((p.x + width) / w).coerceIn(.01f, 1f), ((p.y + height) / h).coerceIn(.01f, 1f))
+            val boxW = p.width.coerceAtLeast(dp(1)).toFloat()
+            val boxH = p.height.coerceAtLeast(dp(1)).toFloat()
+            val left = (p.x / w).coerceIn(0f, .99f)
+            val top = (p.y / h).coerceIn(0f, .99f)
+            return RectF(
+                left,
+                top,
+                ((p.x + boxW) / w).coerceIn(left + .001f, 1f),
+                ((p.y + boxH) / h).coerceIn(top + .001f, 1f)
+            )
         }
         fun reset(r: RectF) {
             val p = layoutParams as WindowManager.LayoutParams
@@ -148,8 +164,8 @@ class OcrAreaSelectionService : Service() {
                         p.width = (dp(150) + dx).coerceIn(dp(90), dp(240))
                         p.height = (dp(76) + dy).coerceIn(dp(58), dp(120))
                     } else {
-                        p.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - p.width)
-                        p.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - p.height)
+                        p.x = (startX + dx).coerceIn(0, (resources.displayMetrics.widthPixels - p.width).coerceAtLeast(0))
+                        p.y = (startY + dy).coerceIn(0, (resources.displayMetrics.heightPixels - p.height).coerceAtLeast(0))
                     }
                     wm.updateViewLayout(this, p); return true
                 }
