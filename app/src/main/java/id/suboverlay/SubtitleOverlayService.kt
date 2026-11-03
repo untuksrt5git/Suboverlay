@@ -454,6 +454,10 @@ class SubtitleOverlayService : Service() {
             currentInstance?.controlHandle?.visibility = android.view.View.VISIBLE
         }
 
+        // Accessibility OCR must not inspect the screen while our own panel
+        // covers the browser's player controls.
+        fun isControlPanelOpen(): Boolean = currentInstance?.controlPanel != null
+
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
         }
