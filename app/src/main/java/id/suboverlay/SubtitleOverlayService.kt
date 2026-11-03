@@ -214,6 +214,10 @@ class SubtitleOverlayService : Service() {
         addControl(appearance, "Op−") { adjustBackgroundAlpha(-20) }
         addControl(appearance, "Op+") { adjustBackgroundAlpha(20) }
         val actions = row()
+        addControl(actions, "Ganti subtitle") {
+            val picker = Intent(this, SubtitlePickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(picker)
+        }
         addControl(actions, "Geser subtitle") { toggleDragMode() }
         addControl(actions, "Tutup panel") { toggleControlPanel() }
         addControl(actions, "Matikan") { stopOverlay(); stopSelf() }
