@@ -15,6 +15,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
 
 class MainActivity : Activity() {
     private val pickSubtitle = 1001
@@ -92,21 +93,24 @@ class MainActivity : Activity() {
         if (requestCode != pickSubtitle) return
         restoreSubtitlePickerButton()
         if (resultCode != RESULT_OK) return
-        val uri = data?.data ?: return
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: SecurityException) { }
-        val displayName = queryDisplayName(uri)
+        val selectedUri = data?.data ?: return
+        val displayName = queryDisplayName(selectedUri)
+        val localUri = try {
+            copySubtitleToInternalStorage(selectedUri, displayName)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Gagal menyalin file subtitle: ${e.message ?: "file tidak dapat dibaca"}", Toast.LENGTH_LONG).show()
+            return
+        }
         getSharedPreferences("subtitle_selection", MODE_PRIVATE).edit()
-            .putString("uri", uri.toString())
+            .putString("uri", localUri.toString())
             .putString("display_name", displayName)
             .commit()
         refreshSubtitleStatus()
         if (!Settings.canDrawOverlays(this)) {
-            pendingUri = uri
+            pendingUri = localUri
             Toast.makeText(this, "Izinkan Suboverlay tampil di atas aplikasi lain", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
-        } else startOverlay(uri)
+        } else startOverlay(localUri)
     }
 
     override fun onResume() {
@@ -130,7 +134,7 @@ class MainActivity : Activity() {
         subtitlePickerButton.isEnabled = false
         subtitlePickerButton.text = "Membuka pemilih file..."
         try {
-            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
             }, pickSubtitle)
@@ -146,6 +150,27 @@ class MainActivity : Activity() {
             subtitlePickerButton.isEnabled = true
             subtitlePickerButton.text = "Pilih / Ganti subtitle (.srt / .vtt)"
         }
+    }
+
+    private fun copySubtitleToInternalStorage(sourceUri: Uri, displayName: String): Uri {
+        val extension = displayName.substringAfterLast('.', "").lowercase()
+            .takeIf { it == "srt" || it == "vtt" } ?: "srt"
+        val directory = File(filesDir, "subtitles").apply { mkdirs() }
+        val target = File(directory, "active_subtitle.$extension")
+        val temporary = File(directory, "active_subtitle.$extension.tmp")
+        contentResolver.openInputStream(sourceUri).use { input ->
+            requireNotNull(input) { "Tidak dapat membuka file yang dipilih" }
+            temporary.outputStream().use { output -> input.copyTo(output) }
+        }
+        if (target.exists() && !target.delete()) {
+            temporary.delete()
+            throw IllegalStateException("Tidak dapat mengganti subtitle lama")
+        }
+        if (!temporary.renameTo(target)) {
+            temporary.delete()
+            throw IllegalStateException("Tidak dapat menyimpan subtitle")
+        }
+        return Uri.fromFile(target)
     }
 
     private fun queryDisplayName(uri: Uri): String {
