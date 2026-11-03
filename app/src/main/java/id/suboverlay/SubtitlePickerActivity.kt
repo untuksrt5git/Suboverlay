@@ -33,7 +33,7 @@ class SubtitlePickerActivity : Activity() {
         } catch (e: Exception) {
             Log.e(DIAGNOSTIC_TAG, "Could not launch Android file picker", e)
             Toast.makeText(this, "Tidak dapat membuka pemilih file.", Toast.LENGTH_SHORT).show()
-            finish()
+            returnToPreviousApp()
         }
     }
 
@@ -44,12 +44,12 @@ class SubtitlePickerActivity : Activity() {
         Log.i(DIAGNOSTIC_TAG, "Picker result received after ${SystemClock.elapsedRealtime() - pickerActivityStartedAtMs} ms; resultCode=$resultCode")
         SubtitleOverlayService.restorePickerControls()
         if (resultCode != RESULT_OK) {
-            finish()
+            returnToPreviousApp()
             return
         }
         val source = data?.data
         if (source == null) {
-            finish()
+            returnToPreviousApp()
             return
         }
         try {
@@ -57,7 +57,7 @@ class SubtitlePickerActivity : Activity() {
             val extension = displayName.substringAfterLast('.', "").lowercase()
             if (extension != "srt" && extension != "vtt") {
                 Toast.makeText(this, "Pilih file subtitle .srt atau .vtt", Toast.LENGTH_LONG).show()
-                finish()
+                returnToPreviousApp()
                 return
             }
             val directory = File(filesDir, "subtitles").apply { mkdirs() }
@@ -83,6 +83,14 @@ class SubtitlePickerActivity : Activity() {
         } catch (e: Exception) {
             Toast.makeText(this, "Gagal memuat subtitle: ${e.message ?: "file tidak dapat dibaca"}", Toast.LENGTH_LONG).show()
         }
+        returnToPreviousApp()
+    }
+
+    /** Send the Suboverlay task behind the app that was playing the video. */
+    private fun returnToPreviousApp() {
+        try {
+            moveTaskToBack(true)
+        } catch (_: Exception) { }
         finish()
     }
 
