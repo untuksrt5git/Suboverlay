@@ -23,6 +23,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.Executors
 
 class SubtitleOverlayService : Service() {
     private lateinit var windowManager: WindowManager
@@ -51,6 +52,8 @@ class SubtitleOverlayService : Service() {
     private var subtitleParams: WindowManager.LayoutParams? = null
     private val overlayPrefs by lazy { getSharedPreferences("overlay_settings", MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
+    private val subtitleLoader = Executors.newSingleThreadExecutor()
+    private var subtitleLoadRequestId = 0L
     private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
 
     override fun onCreate() {
@@ -63,6 +66,7 @@ class SubtitleOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            subtitleLoadRequestId++
             stopOverlay(); stopSelf(); return START_NOT_STICKY
         }
         if (intent?.action == ACTION_START) {
@@ -73,15 +77,30 @@ class SubtitleOverlayService : Service() {
     }
 
     private fun loadSubtitle(uri: Uri) {
-        val content = contentResolver.openInputStream(uri)?.use {
-            BufferedReader(InputStreamReader(it, Charsets.UTF_8)).readText()
-        }.orEmpty()
-        cues = SrtParser.parse(content)
-        manualPositionMs = 0L
-        manualOffsetMs = 0L
-        fallbackStartedAtMs = 0L
-        fallbackRunning = false
-        renderSubtitle()
+        val requestId = ++subtitleLoadRequestId
+        subtitleLoader.execute {
+            try {
+                val content = contentResolver.openInputStream(uri)?.use {
+                    BufferedReader(InputStreamReader(it, Charsets.UTF_8)).readText()
+                }.orEmpty()
+                val parsedCues = SrtParser.parse(content)
+                handler.post {
+                    if (requestId != subtitleLoadRequestId) return@post
+                    cues = parsedCues
+                    manualPositionMs = 0L
+                    manualOffsetMs = 0L
+                    fallbackStartedAtMs = 0L
+                    fallbackRunning = false
+                    renderSubtitle()
+                }
+            } catch (_: Exception) {
+                handler.post {
+                    if (requestId == subtitleLoadRequestId) {
+                        updateSyncStatus("Gagal memuat subtitle")
+                    }
+                }
+            }
+        }
     }
 
     private fun showOverlay() {
@@ -375,7 +394,14 @@ class SubtitleOverlayService : Service() {
             .setSmallIcon(android.R.drawable.ic_media_play).setOngoing(true).build()
     }
 
-    override fun onDestroy() { handler.removeCallbacks(syncTask); stopOverlay(); if (currentInstance === this) currentInstance = null; super.onDestroy() }
+    override fun onDestroy() {
+        subtitleLoadRequestId++
+        subtitleLoader.shutdownNow()
+        handler.removeCallbacks(syncTask)
+        stopOverlay()
+        if (currentInstance === this) currentInstance = null
+        super.onDestroy()
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
