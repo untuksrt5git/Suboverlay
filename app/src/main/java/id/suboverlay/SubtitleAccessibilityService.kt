@@ -4,7 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.graphics.Bitmap\nimport android.graphics.RectF
+import android.graphics.Bitmap
+import android.graphics.RectF
 import android.view.Display
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -84,8 +85,6 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         val isLandscape = bitmap.width > bitmap.height
                         val areaPrefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
                         val areaKey = if (isLandscape) "landscape" else "portrait"
-                        val defaultTop = if (isLandscape) LANDSCAPE_CROP_TOP_RATIO else PORTRAIT_CROP_TOP_RATIO
-                        val defaultBottom = if (isLandscape) LANDSCAPE_CROP_BOTTOM_RATIO else PORTRAIT_CROP_BOTTOM_RATIO
                         fun cropFor(kind: String, default: RectF): Bitmap {
                             val l = areaPrefs.getFloat("${areaKey}_${kind}_left", default.left)
                             val t = areaPrefs.getFloat("${areaKey}_${kind}_top", default.top)
