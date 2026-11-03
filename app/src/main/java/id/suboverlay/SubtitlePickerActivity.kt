@@ -62,7 +62,7 @@ class SubtitlePickerActivity : Activity() {
                 .apply()
             val serviceIntent = Intent(this, SubtitleOverlayService::class.java).apply {
                 action = SubtitleOverlayService.ACTION_START
-                data = localUri
+                this.data = localUri
             }
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent)
             else startService(serviceIntent)
