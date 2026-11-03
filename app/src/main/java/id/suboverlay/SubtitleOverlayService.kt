@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -79,11 +80,19 @@ class SubtitleOverlayService : Service() {
     private fun loadSubtitle(uri: Uri) {
         val requestId = ++subtitleLoadRequestId
         subtitleLoader.execute {
+            val totalStartedAtMs = SystemClock.elapsedRealtime()
             try {
+                val readStartedAtMs = SystemClock.elapsedRealtime()
                 val content = contentResolver.openInputStream(uri)?.use {
                     BufferedReader(InputStreamReader(it, Charsets.UTF_8)).readText()
                 }.orEmpty()
+                val readMs = SystemClock.elapsedRealtime() - readStartedAtMs
+                val parseStartedAtMs = SystemClock.elapsedRealtime()
                 val parsedCues = SrtParser.parse(content)
+                val parseMs = SystemClock.elapsedRealtime() - parseStartedAtMs
+                val fileBytes = uri.path?.let { java.io.File(it).length() } ?: -1L
+                val totalMs = SystemClock.elapsedRealtime() - totalStartedAtMs
+                Log.i("SuboverlaySrt", "Loaded ${uri.lastPathSegment}: bytes=$fileBytes chars=${content.length} cues=${parsedCues.size} readMs=$readMs parseMs=$parseMs totalMs=$totalMs")
                 handler.post {
                     if (requestId != subtitleLoadRequestId) return@post
                     cues = parsedCues
@@ -92,8 +101,12 @@ class SubtitleOverlayService : Service() {
                     fallbackStartedAtMs = 0L
                     fallbackRunning = false
                     renderSubtitle()
+                    android.widget.Toast.makeText(this@SubtitleOverlayService,
+                        "Diagnostik SRT: ${if (fileBytes >= 0) fileBytes / 1024 else "?"} KB · ${parsedCues.size} subtitle · baca ${readMs}ms · parsing ${parseMs}ms",
+                        android.widget.Toast.LENGTH_LONG).show()
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e("SuboverlaySrt", "Failed to read or parse subtitle $uri", e)
                 handler.post {
                     if (requestId == subtitleLoadRequestId) {
                         updateSyncStatus("Gagal memuat subtitle")
