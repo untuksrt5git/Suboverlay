@@ -245,6 +245,17 @@ class SubtitleOverlayService : Service() {
         addControl(actions, "Geser subtitle") { toggleDragMode() }
         addControl(actions, "Tutup panel") { toggleControlPanel() }
         addControl(actions, "Matikan") { stopOverlay(); stopSelf() }
+        // Show the live playback clock in the control panel for diagnosis.
+        // This view was already updated by syncFromMediaSession(), but was not
+        // attached to any visible window, so the status could never be seen.
+        syncStatusView?.let { status ->
+            status.setPadding(dp(8), dp(6), dp(8), dp(6))
+            status.maxLines = 3
+            panel.addView(status, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
+        }
         panel.addView(sync)
         panel.addView(appearance)
         panel.addView(actions)
