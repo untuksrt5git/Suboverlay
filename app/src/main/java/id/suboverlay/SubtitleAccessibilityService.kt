@@ -122,7 +122,15 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                                 "OCR ${if (isLandscape) "LANDSCAPE" else "PORTRAIT"} · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
                                             )
                                         } else {
-                                            SubtitleOverlayService.updateAccessibilityDiagnostic("OCR: salah satu kotak waktu belum terbaca")
+                                            // Report each OCR crop separately so a missed elapsed-time
+                                            // box can be distinguished from a missed duration box.
+                                            val elapsedRaw = elapsedText.text.replace("\n", " ").trim().take(28)
+                                            val durationRaw = durationText.text.replace("\n", " ").trim().take(28)
+                                            val elapsedState = if (elapsed != null) "terbaca" else "TIDAK terbaca [" + elapsedRaw.ifBlank { "kosong" } + "]"
+                                            val durationState = if (duration != null) "terbaca" else "TIDAK terbaca [" + durationRaw.ifBlank { "kosong" } + "]"
+                                            SubtitleOverlayService.updateAccessibilityDiagnostic(
+                                                "OCR " + (if (isLandscape) "LANDSCAPE" else "PORTRAIT") + " · posisi: " + elapsedState + " · durasi: " + durationState
+                                            )
                                         }
                                         elapsedCrop.recycle()
                                         durationCrop.recycle()
