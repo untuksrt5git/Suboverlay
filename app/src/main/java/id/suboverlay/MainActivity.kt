@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
@@ -19,6 +20,7 @@ class MainActivity : Activity() {
     private val pickSubtitle = 1001
     private lateinit var syncButton: Button
     private lateinit var accessibilityButton: Button
+    private lateinit var subtitleStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,16 +66,18 @@ class MainActivity : Activity() {
                 }
             }
         })
+        subtitleStatus = TextView(this).apply {
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, 20, 0, 8)
+        }
+        layout.addView(subtitleStatus)
         layout.addView(Button(this).apply {
-            text = "Pilih file subtitle (.srt / .vtt)"
-            setOnClickListener {
-                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                }, pickSubtitle)
-            }
+            text = "Pilih / Ganti subtitle (.srt / .vtt)"
+            setOnClickListener { openSubtitlePicker() }
         })
         setContentView(layout)
+        refreshSubtitleStatus()
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2001)
@@ -87,6 +91,12 @@ class MainActivity : Activity() {
         try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: SecurityException) { }
+        val displayName = queryDisplayName(uri)
+        getSharedPreferences("subtitle_selection", MODE_PRIVATE).edit()
+            .putString("uri", uri.toString())
+            .putString("display_name", displayName)
+            .commit()
+        refreshSubtitleStatus()
         if (!Settings.canDrawOverlays(this)) {
             pendingUri = uri
             Toast.makeText(this, "Izinkan Suboverlay tampil di atas aplikasi lain", Toast.LENGTH_LONG).show()
@@ -100,12 +110,41 @@ class MainActivity : Activity() {
             syncButton.text = if (isNotificationListenerEnabled()) "MediaSession: AKTIF" else "Aktifkan akses MediaSession"
             accessibilityButton.text = if (isAccessibilityServiceEnabled()) "Accessibility: AKTIF" else "Aktifkan Accessibility seekbar"
         }
+        refreshSubtitleStatus()
         pendingUri?.let {
             if (Settings.canDrawOverlays(this)) {
                 startOverlay(it)
                 pendingUri = null
             }
         }
+    }
+
+    private fun openSubtitlePicker() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }, pickSubtitle)
+    }
+
+    private fun queryDisplayName(uri: Uri): String {
+        var name = uri.lastPathSegment ?: "Subtitle dipilih"
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) name = cursor.getString(index) ?: name
+                }
+            }
+        } catch (_: Exception) { }
+        return name
+    }
+
+    private fun refreshSubtitleStatus() {
+        if (!::subtitleStatus.isInitialized) return
+        val prefs = getSharedPreferences("subtitle_selection", MODE_PRIVATE)
+        subtitleStatus.text = prefs.getString("display_name", null)?.let {
+            "Subtitle aktif: $it"
+        } ?: "Belum ada file subtitle dipilih"
     }
 
     private fun isNotificationListenerEnabled(): Boolean {
