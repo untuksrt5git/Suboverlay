@@ -215,8 +215,19 @@ class SubtitleOverlayService : Service() {
         addControl(appearance, "Op+") { adjustBackgroundAlpha(20) }
         val actions = row()
         addControl(actions, "Ganti subtitle") {
-            val picker = Intent(this, SubtitlePickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(picker)
+            // Remove overlay controls before opening the system picker so they cannot
+            // cover its window on devices that keep application overlays on top.
+            controlPanel?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
+            controlPanel = null
+            controlHandle?.visibility = android.view.View.GONE
+            controlHandle?.text = "⚙"
+            try {
+                val picker = Intent(this, SubtitlePickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(picker)
+            } catch (_: Exception) {
+                controlHandle?.visibility = android.view.View.VISIBLE
+                android.widget.Toast.makeText(this, "Tidak dapat membuka pemilih file", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
         addControl(actions, "Geser subtitle") { toggleDragMode() }
         addControl(actions, "Tutup panel") { toggleControlPanel() }
@@ -413,6 +424,10 @@ class SubtitleOverlayService : Service() {
         private const val MEDIA_SESSION_SEEK_MISMATCH_MS = 2_500L
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
+
+        fun restorePickerControls() {
+            currentInstance?.controlHandle?.visibility = android.view.View.VISIBLE
+        }
 
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
