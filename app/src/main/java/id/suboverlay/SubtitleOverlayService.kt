@@ -68,15 +68,41 @@ class SubtitleOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            subtitleLoadRequestId++
-            stopOverlay(); stopSelf(); return START_NOT_STICKY
-        }
-        if (intent?.action == ACTION_START) {
-            intent.data?.let { loadSubtitle(it) }
-            showOverlay()
+        when (intent?.action) {
+            ACTION_STOP -> {
+                subtitleLoadRequestId++
+                stopOverlay()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_START -> {
+                intent.data?.let { loadSubtitle(it) }
+                ensureOverlay()
+            }
+            ACTION_REPLACE_SUBTITLE -> {
+                // Replace cues only; do not restart the overlay or playback clock.
+                pickerOpen = false
+                intent.data?.let { loadSubtitle(it) }
+                ensureOverlay()
+                controlHandle?.visibility = android.view.View.VISIBLE
+            }
+            ACTION_PICKER_FINISHED -> {
+                pickerOpen = false
+                // Recover the last selected file if Android reclaimed the service.
+                if (overlay == null) {
+                    val saved = getSharedPreferences("subtitle_selection", MODE_PRIVATE).getString("uri", null)
+                    if (saved != null) try { loadSubtitle(Uri.parse(saved)) } catch (_: Exception) { }
+                }
+                ensureOverlay()
+                controlHandle?.visibility = android.view.View.VISIBLE
+            }
         }
         return START_NOT_STICKY
+    }
+
+    private fun ensureOverlay() {
+        if (overlay == null) showOverlay()
+        else if (controlHandle == null) createControlHandle()
     }
 
     private fun loadSubtitle(uri: Uri) {
@@ -458,13 +484,6 @@ class SubtitleOverlayService : Service() {
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
 
-        fun restorePickerControls() {
-            currentInstance?.let { service ->
-                service.pickerOpen = false
-                service.controlHandle?.visibility = android.view.View.VISIBLE
-            }
-        }
-
         // Do not inspect a screen covered by our panel or the system file picker.
         fun shouldPauseAccessibilityScan(): Boolean = currentInstance?.let { service ->
             service.pickerOpen || service.controlPanel?.isShown == true
@@ -492,6 +511,8 @@ class SubtitleOverlayService : Service() {
         }
 
         const val ACTION_START = "id.suboverlay.START"
+        const val ACTION_REPLACE_SUBTITLE = "id.suboverlay.REPLACE_SUBTITLE"
+        const val ACTION_PICKER_FINISHED = "id.suboverlay.PICKER_FINISHED"
         const val ACTION_STOP = "id.suboverlay.STOP"
         private const val CHANNEL_ID = "suboverlay_service"
         private const val NOTIFICATION_ID = 41
