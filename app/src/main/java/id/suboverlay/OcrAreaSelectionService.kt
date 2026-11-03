@@ -73,19 +73,23 @@ class OcrAreaSelectionService : Service() {
         row.addView(Button(this).apply {
             text = "Simpan"
             setOnClickListener {
+                val savedBoxes = views.mapValues { (_, view) -> view.normalized() }
                 val e = prefs.edit()
-                views.forEach { (kind, view) ->
-                    val r = view.normalized()
+                savedBoxes.forEach { (kind, r) ->
                     e.putFloat("${orientationKey}_${kind}_v3_left", r.left)
                         .putFloat("${orientationKey}_${kind}_v3_top", r.top)
                         .putFloat("${orientationKey}_${kind}_v3_right", r.right)
                         .putFloat("${orientationKey}_${kind}_v3_bottom", r.bottom)
                 }
                 val saved = e.commit()
+                val coordinateSummary = savedBoxes.entries.joinToString(" · ") { (kind, r) ->
+                    val name = if (kind == "elapsed") "Waktu" else "Durasi"
+                    "$name X${(r.left * 100).toInt()}% Y${(r.top * 100).toInt()}%"
+                }
                 Toast.makeText(
                     this@OcrAreaSelectionService,
-                    if (saved) "Posisi dan ukuran area OCR tersimpan ($orientationKey)" else "Gagal menyimpan area OCR",
-                    Toast.LENGTH_SHORT
+                    if (saved) "OCR $orientationKey tersimpan: $coordinateSummary" else "Gagal menyimpan area OCR",
+                    Toast.LENGTH_LONG
                 ).show()
                 stopSelf()
             }
@@ -122,6 +126,11 @@ class OcrAreaSelectionService : Service() {
         private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x6633B5E5 }
         private val border = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.YELLOW; style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
         private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = dp(12).toFloat(); isFakeBoldText = true }
+        private val coordinateText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = dp(9).toFloat()
+            isFakeBoldText = true
+        }
         private val handle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         private var downX = 0f; private var downY = 0f; private var startX = 0; private var startY = 0
         private var startWidth = 0
@@ -153,7 +162,11 @@ class OcrAreaSelectionService : Service() {
             c.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), bg)
             c.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), border)
             c.drawText(label, dp(8).toFloat(), dp(20).toFloat(), txt)
-            c.drawText(if (kind == "elapsed") "00:00" else "02:10:05", dp(8).toFloat(), dp(48).toFloat(), txt)
+            c.drawText(if (kind == "elapsed") "00:00" else "02:10:05", dp(8).toFloat(), dp(43).toFloat(), txt)
+            val position = normalized()
+            val xPercent = (position.left * 100).toInt()
+            val yPercent = (position.top * 100).toInt()
+            c.drawText("X $xPercent%  Y $yPercent%", dp(8).toFloat(), height - dp(5).toFloat(), coordinateText)
             c.drawCircle(width - dp(9).toFloat(), height - dp(9).toFloat(), dp(8).toFloat(), handle)
         }
         override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -174,7 +187,9 @@ class OcrAreaSelectionService : Service() {
                         p.x = (startX + dx).coerceIn(0, (resources.displayMetrics.widthPixels - p.width).coerceAtLeast(0))
                         p.y = (startY + dy).coerceIn(0, (resources.displayMetrics.heightPixels - p.height).coerceAtLeast(0))
                     }
-                    wm.updateViewLayout(this, p); return true
+                    wm.updateViewLayout(this, p)
+                    invalidate()
+                    return true
                 }
                 MotionEvent.ACTION_UP -> return true
             }
