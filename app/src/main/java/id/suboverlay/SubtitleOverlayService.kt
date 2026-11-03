@@ -96,10 +96,11 @@ class SubtitleOverlayService : Service() {
                 handler.post {
                     if (requestId != subtitleLoadRequestId) return@post
                     cues = parsedCues
-                    manualPositionMs = 0L
+                    // Keep the current video clock when replacing a subtitle.
+                    // Resetting it to zero makes every cue appear out of range
+                    // when the browser position source is temporarily unavailable
+                    // after returning from the system file picker.
                     manualOffsetMs = 0L
-                    fallbackStartedAtMs = 0L
-                    fallbackRunning = false
                     renderSubtitle()
                     android.widget.Toast.makeText(this@SubtitleOverlayService,
                         "Diagnostik SRT: ${if (fileBytes >= 0) fileBytes / 1024 else "?"} KB · ${parsedCues.size} subtitle · baca ${readMs}ms · parsing ${parseMs}ms",
