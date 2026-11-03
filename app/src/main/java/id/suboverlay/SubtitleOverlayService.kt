@@ -248,6 +248,8 @@ class SubtitleOverlayService : Service() {
             removeControlPanel()
             return
         }
+        val isLandscape = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
         fun row(): LinearLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -255,16 +257,21 @@ class SubtitleOverlayService : Service() {
         fun addControl(parent: LinearLayout, label: String, action: () -> Unit) {
             parent.addView(Button(this).apply {
                 text = label
-                textSize = 11f
+                textSize = if (isLandscape) 10f else 11f
                 minWidth = 0
-                setPadding(dp(4), 0, dp(4), 0)
-                layoutParams = LinearLayout.LayoutParams(0, dp(44), 1f)
+                setPadding(dp(if (isLandscape) 3 else 4), 0, dp(if (isLandscape) 3 else 4), 0)
+                layoutParams = LinearLayout.LayoutParams(0, dp(if (isLandscape) 36 else 44), 1f)
                 setOnClickListener { action() }
             })
         }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(6), dp(4), dp(6), dp(4))
+            setPadding(
+                dp(if (isLandscape) 4 else 6),
+                dp(if (isLandscape) 2 else 4),
+                dp(if (isLandscape) 4 else 6),
+                dp(if (isLandscape) 2 else 4)
+            )
             setBackgroundColor(0xEE111111.toInt())
         }
         val sync = row()
@@ -314,10 +321,8 @@ class SubtitleOverlayService : Service() {
         panel.addView(sync)
         panel.addView(appearance)
         panel.addView(actions)
-        val isLandscape = resources.configuration.orientation ==
-            android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val params = WindowManager.LayoutParams(
-            dp(300), WindowManager.LayoutParams.WRAP_CONTENT,
+            dp(if (isLandscape) 240 else 300), WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
