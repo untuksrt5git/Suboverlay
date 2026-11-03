@@ -340,24 +340,15 @@ class SubtitleOverlayService : Service() {
                     controller.playbackState?.let { state ->
                         state.position >= 0L &&
                             (state.state == PlaybackState.STATE_PLAYING ||
-                                state.state == PlaybackState.STATE_PAUSED ||
-                                state.state == PlaybackState.STATE_FAST_FORWARDING ||
-                                state.state == PlaybackState.STATE_REWINDING)
+                                state.state == PlaybackState.STATE_PAUSED)
                     } == true
             }
 
             if (ucSession != null) {
                 val state = ucSession.playbackState!!
-                val isAdvancing = state.state == PlaybackState.STATE_PLAYING ||
-                    state.state == PlaybackState.STATE_FAST_FORWARDING ||
-                    state.state == PlaybackState.STATE_REWINDING
-                val elapsedSinceUpdate = (now - state.lastPositionUpdateTime).coerceAtLeast(0L)
-                // Respect the browser's reported playback speed. Fast-forward may
-                // advance faster than real time; rewind may report a negative speed.
-                val playbackSpeed = state.playbackSpeed.toDouble()
-                    .takeIf { it.isFinite() } ?: 1.0
                 val sessionPosition = state.position +
-                    if (isAdvancing) (elapsedSinceUpdate * playbackSpeed).toLong() else 0L
+                    if (state.state == PlaybackState.STATE_PLAYING)
+                        (now - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
                 val mediaPosition = sessionPosition.coerceIn(0L, 24L * 60L * 60L * 1000L)
                 val accessFresh = accessibilityPositionMs >= 0L &&
                     now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
@@ -374,7 +365,7 @@ class SubtitleOverlayService : Service() {
                     kotlin.math.abs(accessPosition - mediaPosition) >= MEDIA_SESSION_SEEK_MISMATCH_MS
 
                 manualPositionMs = if (accessibilitySawSeek) accessPosition else mediaPosition
-                val stateLabel = if (isAdvancing) "PLAY" else "PAUSE"
+                val stateLabel = if (state.state == PlaybackState.STATE_PLAYING) "PLAY" else "PAUSE"
                 updateSyncStatus(
                     if (accessibilitySawSeek)
                         "Seek UC terdeteksi · Accessibility/OCR: ${manualPositionMs / 1000}s (MediaSession tertinggal)"
