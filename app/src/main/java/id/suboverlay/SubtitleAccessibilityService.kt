@@ -44,7 +44,11 @@ class SubtitleAccessibilityService : AccessibilityService() {
                 if (android.os.Build.VERSION.SDK_INT >= 30) captureScreenForTime()
                 publishEstimatedPosition()
             }
-            handler.postDelayed(this, POLL_INTERVAL_MS)
+            // Keep fast sampling while playback is moving; when paused or waiting
+            // for the first valid position, reduce OCR wakeups to save battery.
+            val nextPollInterval = if (lastKnownPlaying) PLAYING_POLL_INTERVAL_MS
+                else IDLE_POLL_INTERVAL_MS
+            handler.postDelayed(this, nextPollInterval)
         }
     }
 
@@ -437,7 +441,8 @@ class SubtitleAccessibilityService : AccessibilityService() {
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 500L
+        private const val PLAYING_POLL_INTERVAL_MS = 500L
+        private const val IDLE_POLL_INTERVAL_MS = 1_200L
         private const val PLAYING_WINDOW_MS = 3_000L
         private const val POSITION_CHANGE_THRESHOLD_MS = 250L
         private const val SEEK_THRESHOLD_MS = 2_000L
