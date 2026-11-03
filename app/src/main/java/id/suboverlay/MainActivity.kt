@@ -23,6 +23,8 @@ class MainActivity : Activity() {
     private lateinit var accessibilityButton: Button
     private lateinit var subtitleStatus: TextView
     private lateinit var subtitlePickerButton: Button
+    private lateinit var showOverlayButton: Button
+    private var pendingShowOverlay = false
     private var isSubtitlePickerOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,6 +77,11 @@ class MainActivity : Activity() {
             setPadding(0, 20, 0, 8)
         }
         layout.addView(subtitleStatus)
+        showOverlayButton = Button(this).apply {
+            text = "Tampilkan Overlay"
+            setOnClickListener { showSavedOverlay() }
+        }
+        layout.addView(showOverlayButton)
         subtitlePickerButton = Button(this).apply {
             text = "Pilih / Ganti subtitle (.srt / .vtt)"
             setOnClickListener { openSubtitlePicker() }
@@ -120,8 +127,12 @@ class MainActivity : Activity() {
             accessibilityButton.text = if (isAccessibilityServiceEnabled()) "Accessibility: AKTIF" else "Aktifkan Accessibility seekbar"
         }
         refreshSubtitleStatus()
-        pendingUri?.let {
-            if (Settings.canDrawOverlays(this)) {
+        if (Settings.canDrawOverlays(this)) {
+            if (pendingShowOverlay) {
+                pendingShowOverlay = false
+                startOverlay(loadSavedSubtitleUri())
+            }
+            pendingUri?.let {
                 startOverlay(it)
                 pendingUri = null
             }
@@ -206,13 +217,33 @@ class MainActivity : Activity() {
         return enabled.split(":").any { ComponentName.unflattenFromString(it) == target }
     }
 
-    private fun startOverlay(uri: Uri) {
+    private fun showSavedOverlay() {
+        if (!Settings.canDrawOverlays(this)) {
+            pendingShowOverlay = true
+            Toast.makeText(this, "Izinkan Suboverlay tampil di atas aplikasi lain terlebih dahulu.", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+            return
+        }
+        startOverlay(loadSavedSubtitleUri())
+    }
+
+    private fun loadSavedSubtitleUri(): Uri? {
+        val saved = getSharedPreferences("subtitle_selection", MODE_PRIVATE).getString("uri", null)
+        return saved?.let { try { Uri.parse(it) } catch (_: Exception) { null } }
+    }
+
+    private fun startOverlay(uri: Uri?) {
         val intent = Intent(this, SubtitleOverlayService::class.java).apply {
-            action = SubtitleOverlayService.ACTION_START
+            action = SubtitleOverlayService.ACTION_SHOW_OVERLAY
             data = uri
         }
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
-        Toast.makeText(this, "Subtitle overlay dimulai", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            this,
+            if (uri == null) "Overlay ditampilkan. Pilih subtitle untuk mulai membaca teks."
+            else "Overlay ditampilkan dengan subtitle terakhir.",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     companion object { private var pendingUri: Uri? = null }
