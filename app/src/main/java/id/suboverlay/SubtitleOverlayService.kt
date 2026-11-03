@@ -314,12 +314,21 @@ class SubtitleOverlayService : Service() {
         panel.addView(sync)
         panel.addView(appearance)
         panel.addView(actions)
+        val isLandscape = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val params = WindowManager.LayoutParams(
             dp(300), WindowManager.LayoutParams.WRAP_CONTENT,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.END; x = dp(8); y = dp(150) }
+        ).apply {
+            // Keep the panel away from the calibrated OCR time boxes:
+            // portrait OCR reads near the upper quarter, landscape OCR near the bottom.
+            gravity = if (isLandscape) Gravity.TOP or Gravity.END
+                else Gravity.BOTTOM or Gravity.END
+            x = dp(8)
+            y = if (isLandscape) dp(150) else dp(220)
+        }
         windowManager.addView(panel, params)
         controlPanel = panel
         controlHandle?.text = "×"
