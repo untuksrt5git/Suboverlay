@@ -134,11 +134,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                 elapsedCrop.recycle(); durationCrop.recycle()
                                 screenshotInProgress = false
                             }
-                            .addOnFailureListener(screenshotExecutor) {
-                                controlCrop.recycle()
-                                screenshotInProgress = false
-                            }
-                    } catch (_: Exception) {
+                                                } catch (_: Exception) {
                         screenshotInProgress = false
                     }
                 }
