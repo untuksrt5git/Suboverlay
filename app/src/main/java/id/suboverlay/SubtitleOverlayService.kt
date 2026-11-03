@@ -326,9 +326,9 @@ class SubtitleOverlayService : Service() {
             // portrait OCR reads near the upper quarter, landscape OCR near the bottom.
             // In landscape, keep the panel centered at the very top so it
             // cannot cover the elapsed/duration OCR boxes at the lower corners.
-            gravity = if (isLandscape) Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = if (isLandscape) Gravity.TOP or Gravity.START
                 else Gravity.BOTTOM or Gravity.END
-            x = if (isLandscape) 0 else dp(8)
+            x = dp(8)
             y = if (isLandscape) dp(8) else dp(220)
         }
         windowManager.addView(panel, params)
