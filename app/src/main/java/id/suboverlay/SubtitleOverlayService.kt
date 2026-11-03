@@ -236,9 +236,29 @@ class SubtitleOverlayService : Service() {
                 val sessionPosition = state.position +
                     if (state.state == PlaybackState.STATE_PLAYING)
                         (now - state.lastPositionUpdateTime).coerceAtLeast(0L) else 0L
-                manualPositionMs = sessionPosition.coerceIn(0L, 24L * 60L * 60L * 1000L)
+                val mediaPosition = sessionPosition.coerceIn(0L, 24L * 60L * 60L * 1000L)
+                val accessFresh = accessibilityPositionMs >= 0L &&
+                    now - accessibilityUpdatedAtMs < ACCESSIBILITY_FRESH_MS
+                val accessPosition = if (accessFresh && accessibilityPlaying) {
+                    (accessibilityPositionMs + (now - accessibilityUpdatedAtMs).coerceAtLeast(0L))
+                        .coerceIn(0L, 24L * 60L * 60L * 1000L)
+                } else accessibilityPositionMs.coerceAtLeast(0L)
+
+                // Some browser MediaSessions keep publishing an old timeline after
+                // the user seeks. If the independent Accessibility/OCR clock sees
+                // a large jump, trust that fresh position instead of freezing on
+                // the stale MediaSession timestamp.
+                val accessibilitySawSeek = accessFresh &&
+                    kotlin.math.abs(accessPosition - mediaPosition) >= MEDIA_SESSION_SEEK_MISMATCH_MS
+
+                manualPositionMs = if (accessibilitySawSeek) accessPosition else mediaPosition
                 val stateLabel = if (state.state == PlaybackState.STATE_PLAYING) "PLAY" else "PAUSE"
-                updateSyncStatus("MediaSession UC (utama): $stateLabel · ${manualPositionMs / 1000}s")
+                updateSyncStatus(
+                    if (accessibilitySawSeek)
+                        "Seek UC terdeteksi · Accessibility/OCR: ${manualPositionMs / 1000}s (MediaSession tertinggal)"
+                    else
+                        "MediaSession UC: $stateLabel · ${manualPositionMs / 1000}s"
+                )
                 renderSubtitle()
                 return
             }
@@ -359,7 +379,8 @@ class SubtitleOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private const val ACCESSIBILITY_FRESH_MS = 2_000L
+        private const val ACCESSIBILITY_FRESH_MS = 2_500L
+        private const val MEDIA_SESSION_SEEK_MISMATCH_MS = 2_500L
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
 
