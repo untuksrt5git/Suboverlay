@@ -72,13 +72,9 @@ class SubtitlePickerActivity : Activity() {
                 .putString("uri", localUri.toString())
                 .putString("display_name", displayName)
                 .apply()
-            val serviceIntent = Intent(this, SubtitleOverlayService::class.java).apply {
-                action = SubtitleOverlayService.ACTION_START
-                this.data = localUri
-            }
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent)
-            else startService(serviceIntent)
             Toast.makeText(this, "Subtitle diganti: $displayName", Toast.LENGTH_SHORT).show()
+            returnToPreviousApp(localUri)
+            return
         } catch (e: Exception) {
             Toast.makeText(this, "Gagal memuat subtitle: ${e.message ?: "file tidak dapat dibaca"}", Toast.LENGTH_LONG).show()
         }
@@ -91,9 +87,20 @@ class SubtitlePickerActivity : Activity() {
      * that was underneath (normally UC Browser). Do not move Suboverlay's
      * main task to the back; it may not be the task that launched the picker.
      */
-    private fun returnToPreviousApp() {
-        // Resume OCR and restore the floating handle only after file I/O is done.
-        SubtitleOverlayService.restorePickerControls()
+    private fun returnToPreviousApp(replacementUri: Uri? = null) {
+        // Explicitly notify the foreground service that the picker has finished.
+        // It can restore the overlay even if Android recreated the service meanwhile.
+        val serviceIntent = Intent(this, SubtitleOverlayService::class.java).apply {
+            action = if (replacementUri != null) SubtitleOverlayService.ACTION_REPLACE_SUBTITLE
+                else SubtitleOverlayService.ACTION_PICKER_FINISHED
+            data = replacementUri
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent)
+            else startService(serviceIntent)
+        } catch (e: Exception) {
+            Log.e(DIAGNOSTIC_TAG, "Could not notify overlay service that picker finished", e)
+        }
         finish()
     }
 
