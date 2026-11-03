@@ -119,7 +119,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                         if (elapsed != null && duration != null && elapsed < duration) {
                                             recordPosition(elapsed, screenshotCapturedAt)
                                             SubtitleOverlayService.updateAccessibilityDiagnostic(
-                                                "OCR ${orientationLabel()} · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
+                                                "OCR ${if (isLandscape) "LANDSCAPE" else "PORTRAIT"} · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
                                             )
                                         } else {
                                             SubtitleOverlayService.updateAccessibilityDiagnostic("OCR: salah satu kotak waktu belum terbaca")
@@ -232,6 +232,17 @@ class SubtitleAccessibilityService : AccessibilityService() {
     }
 
     private fun scanActiveWindow() {
+        // In landscape UC's fullscreen player exposes stale/duplicated hidden time
+        // labels in its accessibility tree. Prefer the two calibrated screen OCR
+        // regions there; the tree labels remain useful for embedded portrait mode.
+        if (resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+            SubtitleOverlayService.updateAccessibilityDiagnostic(
+                "LANDSCAPE · membaca waktu dari dua kotak OCR"
+            )
+            return
+        }
+
         val roots = mutableListOf<AccessibilityNodeInfo>()
         try {
             // The video player may live in a non-active browser window.
