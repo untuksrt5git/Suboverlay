@@ -93,10 +93,10 @@ class OcrAreaSelectionService : Service() {
         row.addView(Button(this).apply {
             text = "Reset"
             setOnClickListener {
-                val elapsedDefault = if (landscape) RectF(.02f, .72f, .10f, .81f)
-                    else RectF(.13f, .47f, .25f, .54f)
-                val durationDefault = if (landscape) RectF(.81f, .72f, .91f, .81f)
-                    else RectF(.65f, .47f, .78f, .54f)
+                val elapsedDefault = if (landscape) RectF(.02f, .81f, .10f, .865f)
+                    else RectF(.145f, .235f, .275f, .275f)
+                val durationDefault = if (landscape) RectF(.905f, .81f, .985f, .865f)
+                    else RectF(.735f, .235f, .845f, .275f)
                 views["elapsed"]?.reset(elapsedDefault)
                 views["duration"]?.reset(durationDefault)
             }
@@ -124,6 +124,8 @@ class OcrAreaSelectionService : Service() {
         private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = dp(12).toFloat(); isFakeBoldText = true }
         private val handle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         private var downX = 0f; private var downY = 0f; private var startX = 0; private var startY = 0
+        private var startWidth = 0
+        private var startHeight = 0
         private var resizing = false
 
         fun normalized(): RectF {
@@ -159,14 +161,15 @@ class OcrAreaSelectionService : Service() {
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = e.rawX; downY = e.rawY; startX = p.x; startY = p.y
+                    startWidth = p.width; startHeight = p.height
                     resizing = e.x > width - dp(28) && e.y > height - dp(28)
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (e.rawX - downX).toInt(); val dy = (e.rawY - downY).toInt()
                     if (resizing) {
-                        p.width = (dp(150) + dx).coerceIn(dp(90), dp(240))
-                        p.height = (dp(76) + dy).coerceIn(dp(58), dp(120))
+                        p.width = (startWidth + dx).coerceIn(dp(44), dp(240))
+                        p.height = (startHeight + dy).coerceIn(dp(36), dp(120))
                     } else {
                         p.x = (startX + dx).coerceIn(0, (resources.displayMetrics.widthPixels - p.width).coerceAtLeast(0))
                         p.y = (startY + dy).coerceIn(0, (resources.displayMetrics.heightPixels - p.height).coerceAtLeast(0))
