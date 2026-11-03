@@ -77,12 +77,17 @@ class OcrAreaSelectionService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun load(prefs: android.content.SharedPreferences, kind: String, d: RectF) = RectF(
-        prefs.getFloat("${orientationKey}_${kind}_v3_left", d.left),
-        prefs.getFloat("${orientationKey}_${kind}_v3_top", d.top),
-        prefs.getFloat("${orientationKey}_${kind}_v3_right", d.right),
-        prefs.getFloat("${orientationKey}_${kind}_v3_bottom", d.bottom)
-    )
+    private fun profileVersion(kind: String) = if (kind == "duration") "v4" else "v3"
+
+    private fun load(prefs: android.content.SharedPreferences, kind: String, d: RectF): RectF {
+        val version = profileVersion(kind)
+        return RectF(
+            prefs.getFloat("${orientationKey}_${kind}_${version}_left", d.left),
+            prefs.getFloat("${orientationKey}_${kind}_${version}_top", d.top),
+            prefs.getFloat("${orientationKey}_${kind}_${version}_right", d.right),
+            prefs.getFloat("${orientationKey}_${kind}_${version}_bottom", d.bottom)
+        )
+    }
 
     private fun fullScreenSize(): Point {
         val point = Point()
@@ -142,10 +147,11 @@ class OcrAreaSelectionService : Service() {
                 val savedBoxes = views.mapValues { (_, view) -> view.normalized() }
                 val e = prefs.edit()
                 savedBoxes.forEach { (kind, r) ->
-                    e.putFloat("${orientationKey}_${kind}_v3_left", r.left)
-                        .putFloat("${orientationKey}_${kind}_v3_top", r.top)
-                        .putFloat("${orientationKey}_${kind}_v3_right", r.right)
-                        .putFloat("${orientationKey}_${kind}_v3_bottom", r.bottom)
+                    val version = profileVersion(kind)
+                    e.putFloat("${orientationKey}_${kind}_${version}_left", r.left)
+                        .putFloat("${orientationKey}_${kind}_${version}_top", r.top)
+                        .putFloat("${orientationKey}_${kind}_${version}_right", r.right)
+                        .putFloat("${orientationKey}_${kind}_${version}_bottom", r.bottom)
                 }
                 val saved = e.commit()
                 val coordinateSummary = savedBoxes.entries.joinToString(" · ") { (kind, r) ->
