@@ -3,10 +3,10 @@ package id.suboverlay
 import android.app.Service
 import android.content.Intent
 import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.os.IBinder
 import android.view.Gravity
 import android.view.MotionEvent
@@ -16,114 +16,144 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Toast
 
+/** Two independently movable/resizable OCR windows; no full-screen touch-blocking layer. */
 class OcrAreaSelectionService : Service() {
     private lateinit var wm: WindowManager
-    private var panel: View? = null
-    private var selector: AreaView? = null
-    private var params: WindowManager.LayoutParams? = null
+    private val views = mutableMapOf<String, BoxView>()
+    private var controls: View? = null
+    private var orientationKey = "portrait"
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (panel != null) return START_NOT_STICKY
+        if (views.isNotEmpty()) return START_NOT_STICKY
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        val prefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
         val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-        val suffix = if (landscape) "landscape" else "portrait"
-        val left = prefs.getFloat("${suffix}_left", 0.02f)
-        val top = prefs.getFloat("${suffix}_top", if (landscape) 0.78f else 0.69f)
-        val right = prefs.getFloat("${suffix}_right", 0.98f)
-        val bottom = prefs.getFloat("${suffix}_bottom", if (landscape) 0.98f else 0.755f)
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0x55000000)
-        }
-        val area = AreaView(left, top, right, bottom)
-        selector = area
-        root.addView(area, LinearLayout.LayoutParams(-1, 0, 1f))
-        val controls = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.BLACK)
-        }
-        controls.addView(Button(this).apply {
-            text = "Simpan"
-            setOnClickListener {
-                val r = area.normalizedRect()
-                prefs.edit().putFloat("${suffix}_left", r.left).putFloat("${suffix}_top", r.top)
-                    .putFloat("${suffix}_right", r.right).putFloat("${suffix}_bottom", r.bottom).apply()
-                Toast.makeText(this@OcrAreaSelectionService, "Area OCR tersimpan", Toast.LENGTH_SHORT).show()
-                stopSelf()
-            }
-        })
-        controls.addView(Button(this).apply {
-            text = "Reset"
-            setOnClickListener { area.reset() }
-        })
-        controls.addView(Button(this).apply {
-            text = "Batal"
-            setOnClickListener { stopSelf() }
-        })
-        root.addView(controls, LinearLayout.LayoutParams(-1, -2))
-        panel = root
-        params = WindowManager.LayoutParams(-1, -1,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
-        wm.addView(root, params)
+        orientationKey = if (landscape) "landscape" else "portrait"
+        val prefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
+        val top = if (landscape) .84f else .70f
+        val bottom = if (landscape) .94f else .77f
+        addBox("elapsed", "Waktu awal", load(prefs, "elapsed", RectF(.025f, top, .20f, bottom)))
+        addBox("duration", "Durasi total", load(prefs, "duration", RectF(.79f, top, .98f, bottom)))
+        addControls(prefs, landscape)
         return START_NOT_STICKY
     }
 
+    private fun load(prefs: android.content.SharedPreferences, kind: String, d: RectF) = RectF(
+        prefs.getFloat("${orientationKey}_${kind}_left", d.left),
+        prefs.getFloat("${orientationKey}_${kind}_top", d.top),
+        prefs.getFloat("${orientationKey}_${kind}_right", d.right),
+        prefs.getFloat("${orientationKey}_${kind}_bottom", d.bottom)
+    )
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun addBox(kind: String, label: String, r: RectF) {
+        val v = BoxView(kind, label)
+        val p = WindowManager.LayoutParams(dp(150), dp(76),
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (r.left * resources.displayMetrics.widthPixels).toInt()
+            y = (r.top * resources.displayMetrics.heightPixels).toInt()
+        }
+        wm.addView(v, p)
+        views[kind] = v
+    }
+
+    private fun addControls(prefs: android.content.SharedPreferences, landscape: Boolean) {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setBackgroundColor(0xEE202020.toInt()) }
+        row.addView(Button(this).apply {
+            text = "Simpan"
+            setOnClickListener {
+                val e = prefs.edit()
+                views.forEach { (kind, view) ->
+                    val r = view.normalized()
+                    e.putFloat("${orientationKey}_${kind}_left", r.left)
+                        .putFloat("${orientationKey}_${kind}_top", r.top)
+                        .putFloat("${orientationKey}_${kind}_right", r.right)
+                        .putFloat("${orientationKey}_${kind}_bottom", r.bottom)
+                }
+                e.apply()
+                Toast.makeText(this@OcrAreaSelectionService, "Dua area OCR tersimpan", Toast.LENGTH_SHORT).show()
+                stopSelf()
+            }
+        })
+        row.addView(Button(this).apply {
+            text = "Reset"
+            setOnClickListener {
+                val t = if (landscape) .84f else .70f
+                val b = if (landscape) .94f else .77f
+                views["elapsed"]?.reset(RectF(.025f, t, .20f, b))
+                views["duration"]?.reset(RectF(.79f, t, .98f, b))
+            }
+        })
+        row.addView(Button(this).apply { text = "Batal"; setOnClickListener { stopSelf() } })
+        val p = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(48) }
+        controls = row
+        wm.addView(row, p)
+    }
+
     override fun onDestroy() {
-        panel?.let { try { wm.removeView(it) } catch (_: Exception) { } }
-        panel = null
-        selector = null
+        views.values.forEach { try { wm.removeView(it) } catch (_: Exception) { } }
+        views.clear()
+        controls?.let { try { wm.removeView(it) } catch (_: Exception) { } }
+        controls = null
         super.onDestroy()
     }
 
-    private inner class AreaView(l: Float, t: Float, r: Float, b: Float) : View(this@OcrAreaSelectionService) {
-        private val rect = RectF(l, t, r, b)
-        private val fill = Paint( Paint.ANTI_ALIAS_FLAG).apply { color = 0x5533B5E5 }
-        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.YELLOW; style = Paint.Style.STROKE; strokeWidth = 5f }
+    private inner class BoxView(private val kind: String, private val label: String) : View(this@OcrAreaSelectionService) {
+        private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x6633B5E5 }
+        private val border = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.YELLOW; style = Paint.Style.STROKE; strokeWidth = dp(2).toFloat() }
+        private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = dp(12).toFloat(); isFakeBoldText = true }
         private val handle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-        private var mode = 0
-        private var downX = 0f
-        private var downY = 0f
-        private var start = RectF()
+        private var downX = 0f; private var downY = 0f; private var startX = 0; private var startY = 0
+        private var resizing = false
 
-        fun normalizedRect(): RectF {
-            val w = width.coerceAtLeast(1).toFloat()
-            val h = height.coerceAtLeast(1).toFloat()
-            return RectF((rect.left / w).coerceIn(0f, .99f), (rect.top / h).coerceIn(0f, .99f),
-                (rect.right / w).coerceIn(.01f, 1f), (rect.bottom / h).coerceIn(.01f, 1f))
+        fun normalized(): RectF {
+            val p = layoutParams as WindowManager.LayoutParams
+            val w = resources.displayMetrics.widthPixels.toFloat(); val h = resources.displayMetrics.heightPixels.toFloat()
+            return RectF((p.x / w).coerceIn(0f, .99f), (p.y / h).coerceIn(0f, .99f),
+                ((p.x + width) / w).coerceIn(.01f, 1f), ((p.y + height) / h).coerceIn(.01f, 1f))
         }
-        fun reset() {
-            rect.set(width * .02f, height * .70f, width * .98f, height * .90f)
-            invalidate()
+        fun reset(r: RectF) {
+            val p = layoutParams as WindowManager.LayoutParams
+            p.x = (r.left * resources.displayMetrics.widthPixels).toInt()
+            p.y = (r.top * resources.displayMetrics.heightPixels).toInt()
+            p.width = dp(150); p.height = dp(76); wm.updateViewLayout(this, p)
         }
         override fun onDraw(c: Canvas) {
-            super.onDraw(c)
-            if (rect.width() <= 1f || rect.height() <= 1f) rect.set(width*.02f,height*.70f,width*.98f,height*.90f)
-            c.drawRect(rect, fill); c.drawRect(rect, stroke); c.drawCircle(rect.right, rect.bottom, 22f, handle)
-            val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 34f }
-            c.drawText("Geser kotak • tarik titik kanan bawah untuk ubah ukuran", 20f, 48f, label)
+            val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+            c.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), bg)
+            c.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), border)
+            c.drawText(label, dp(8).toFloat(), dp(20).toFloat(), txt)
+            c.drawText(if (kind == "elapsed") "00:00" else "02:10:05", dp(8).toFloat(), dp(48).toFloat(), txt)
+            c.drawCircle(width - dp(9).toFloat(), height - dp(9).toFloat(), dp(8).toFloat(), handle)
         }
         override fun onTouchEvent(e: MotionEvent): Boolean {
+            val p = layoutParams as WindowManager.LayoutParams
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    downX=e.x; downY=e.y; start.set(rect)
-                    mode = if (kotlin.math.abs(e.x-rect.right)<70 && kotlin.math.abs(e.y-rect.bottom)<70) 2 else 1
+                    downX = e.rawX; downY = e.rawY; startX = p.x; startY = p.y
+                    resizing = e.x > width - dp(28) && e.y > height - dp(28)
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx=e.x-downX; val dy=e.y-downY
-                    if (mode==2) { rect.right=(start.right+dx).coerceIn(rect.left+80f,width.toFloat()); rect.bottom=(start.bottom+dy).coerceIn(rect.top+50f,height.toFloat()) }
-                    else {
-                        val x=dx.coerceIn(-start.left,width-start.right); val y=dy.coerceIn(-start.top,height-start.bottom)
-                        rect.set(start.left+x,start.top+y,start.right+x,start.bottom+y)
+                    val dx = (e.rawX - downX).toInt(); val dy = (e.rawY - downY).toInt()
+                    if (resizing) {
+                        p.width = (dp(150) + dx).coerceIn(dp(90), dp(240))
+                        p.height = (dp(76) + dy).coerceIn(dp(58), dp(120))
+                    } else {
+                        p.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - p.width)
+                        p.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - p.height)
                     }
-                    invalidate(); return true
+                    wm.updateViewLayout(this, p); return true
                 }
+                MotionEvent.ACTION_UP -> return true
             }
             return true
         }
