@@ -79,6 +79,16 @@ class SubtitleOverlayService : Service() {
                 intent.data?.let { loadSubtitle(it) }
                 ensureOverlay()
             }
+            ACTION_SHOW_OVERLAY -> {
+                // Show the existing overlay without reopening the picker or
+                // reloading/resetting a subtitle that is already active.
+                if (cues.isEmpty()) {
+                    val saved = intent.data ?: getSharedPreferences("subtitle_selection", MODE_PRIVATE)
+                        .getString("uri", null)?.let { try { Uri.parse(it) } catch (_: Exception) { null } }
+                    saved?.let { loadSubtitle(it) }
+                }
+                ensureOverlay()
+            }
             ACTION_REPLACE_SUBTITLE -> {
                 // Replace cues only; do not restart the overlay or playback clock.
                 pickerOpen = false
@@ -520,6 +530,7 @@ class SubtitleOverlayService : Service() {
         }
 
         const val ACTION_START = "id.suboverlay.START"
+        const val ACTION_SHOW_OVERLAY = "id.suboverlay.SHOW_OVERLAY"
         const val ACTION_REPLACE_SUBTITLE = "id.suboverlay.REPLACE_SUBTITLE"
         const val ACTION_PICKER_FINISHED = "id.suboverlay.PICKER_FINISHED"
         const val ACTION_STOP = "id.suboverlay.STOP"
