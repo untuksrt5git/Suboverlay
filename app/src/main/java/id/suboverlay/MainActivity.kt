@@ -21,6 +21,8 @@ class MainActivity : Activity() {
     private lateinit var syncButton: Button
     private lateinit var accessibilityButton: Button
     private lateinit var subtitleStatus: TextView
+    private lateinit var subtitlePickerButton: Button
+    private var isSubtitlePickerOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,10 +74,11 @@ class MainActivity : Activity() {
             setPadding(0, 20, 0, 8)
         }
         layout.addView(subtitleStatus)
-        layout.addView(Button(this).apply {
+        subtitlePickerButton = Button(this).apply {
             text = "Pilih / Ganti subtitle (.srt / .vtt)"
             setOnClickListener { openSubtitlePicker() }
-        })
+        }
+        layout.addView(subtitlePickerButton)
         setContentView(layout)
         refreshSubtitleStatus()
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -86,7 +89,9 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated by Android; retained for broad device compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != pickSubtitle || resultCode != RESULT_OK) return
+        if (requestCode != pickSubtitle) return
+        restoreSubtitlePickerButton()
+        if (resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -120,10 +125,27 @@ class MainActivity : Activity() {
     }
 
     private fun openSubtitlePicker() {
-        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-        }, pickSubtitle)
+        if (isSubtitlePickerOpen) return
+        isSubtitlePickerOpen = true
+        subtitlePickerButton.isEnabled = false
+        subtitlePickerButton.text = "Membuka pemilih file..."
+        try {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, pickSubtitle)
+        } catch (e: Exception) {
+            restoreSubtitlePickerButton()
+            Toast.makeText(this, "Tidak dapat membuka pemilih file.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun restoreSubtitlePickerButton() {
+        isSubtitlePickerOpen = false
+        if (::subtitlePickerButton.isInitialized) {
+            subtitlePickerButton.isEnabled = true
+            subtitlePickerButton.text = "Pilih / Ganti subtitle (.srt / .vtt)"
+        }
     }
 
     private fun queryDisplayName(uri: Uri): String {
