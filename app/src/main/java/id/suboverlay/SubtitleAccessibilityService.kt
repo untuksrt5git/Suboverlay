@@ -91,10 +91,14 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         val areaPrefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
                         val areaKey = if (isLandscape) "landscape" else "portrait"
                         fun cropFor(kind: String, default: RectF): Bitmap {
-                            val l = areaPrefs.getFloat("${areaKey}_${kind}_v3_left", default.left)
-                            val t = areaPrefs.getFloat("${areaKey}_${kind}_v3_top", default.top)
-                            val r = areaPrefs.getFloat("${areaKey}_${kind}_v3_right", default.right)
-                            val b = areaPrefs.getFloat("${areaKey}_${kind}_v3_bottom", default.bottom)
+                            // Keep the elapsed box's calibrated v3 coordinates.
+                            // Give the duration box a fresh v4 profile: previous saved
+                            // narrow crops could clip the final digits of the total time.
+                            val version = if (kind == "duration") "v4" else "v3"
+                            val l = areaPrefs.getFloat("${areaKey}_${kind}_${version}_left", default.left)
+                            val t = areaPrefs.getFloat("${areaKey}_${kind}_${version}_top", default.top)
+                            val r = areaPrefs.getFloat("${areaKey}_${kind}_${version}_right", default.right)
+                            val b = areaPrefs.getFloat("${areaKey}_${kind}_${version}_bottom", default.bottom)
                             val x1 = (bitmap.width * l).toInt().coerceIn(0, bitmap.width - 1)
                             val y1 = (bitmap.height * t).toInt().coerceIn(0, bitmap.height - 1)
                             val x2 = (bitmap.width * r).toInt().coerceIn(x1 + 1, bitmap.width)
@@ -105,7 +109,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         // portrait is an embedded player in the page; landscape is fullscreen.
                         val elapsedDefault = if (isLandscape) RectF(.02f, .81f, .10f, .865f)
                             else RectF(.145f, .235f, .275f, .275f)
-                        val durationDefault = if (isLandscape) RectF(.905f, .81f, .985f, .865f)
+                        val durationDefault = if (isLandscape) RectF(.875f, .795f, .995f, .88f)
                             else RectF(.735f, .235f, .845f, .275f)
                         val elapsedCrop = cropFor("elapsed", elapsedDefault)
                         val durationCrop = cropFor("duration", durationDefault)
