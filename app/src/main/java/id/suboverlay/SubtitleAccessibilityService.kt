@@ -36,9 +36,14 @@ class SubtitleAccessibilityService : AccessibilityService() {
     private val poll = object : Runnable {
         override fun run() {
             reportOrientationIfChanged()
-            scanActiveWindow()
-            if (android.os.Build.VERSION.SDK_INT >= 30) captureScreenForTime()
-            publishEstimatedPosition()
+            // The floating control panel can cover the browser's time labels and
+            // its own button captions can be mistaken for OCR time text.
+            // Keep the last good diagnostic/position while the panel is visible.
+            if (!SubtitleOverlayService.isControlPanelOpen()) {
+                scanActiveWindow()
+                if (android.os.Build.VERSION.SDK_INT >= 30) captureScreenForTime()
+                publishEstimatedPosition()
+            }
             handler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
