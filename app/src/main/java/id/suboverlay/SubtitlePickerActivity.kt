@@ -25,7 +25,7 @@ class SubtitlePickerActivity : Activity() {
         Log.i(DIAGNOSTIC_TAG, "Picker activity created; requesting Android file picker")
         try {
             val launchStartedAtMs = SystemClock.elapsedRealtime()
-            startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
             }, REQUEST_PICK)
@@ -86,11 +86,13 @@ class SubtitlePickerActivity : Activity() {
         returnToPreviousApp()
     }
 
-    /** Send the Suboverlay task behind the app that was playing the video. */
+    /**
+     * This activity is the root of a separate, excluded-from-recents task.
+     * Finishing it closes that temporary task and naturally reveals the app
+     * that was underneath (normally UC Browser). Do not move Suboverlay's
+     * main task to the back; it may not be the task that launched the picker.
+     */
     private fun returnToPreviousApp() {
-        try {
-            moveTaskToBack(true)
-        } catch (_: Exception) { }
         finish()
     }
 
