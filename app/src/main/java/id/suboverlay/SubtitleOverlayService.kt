@@ -236,7 +236,11 @@ class SubtitleOverlayService : Service() {
             controlHandle?.visibility = android.view.View.GONE
             controlHandle?.text = "⚙"
             try {
-                val picker = Intent(this, SubtitlePickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val picker = Intent(this, SubtitlePickerActivity::class.java).apply {
+                    // Keep the picker in its own temporary task. Finishing it then
+                    // reveals the browser task instead of Suboverlay's MainActivity.
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+                }
                 startActivity(picker)
             } catch (_: Exception) {
                 controlHandle?.visibility = android.view.View.VISIBLE
@@ -456,7 +460,7 @@ class SubtitleOverlayService : Service() {
 
         // Accessibility OCR must not inspect the screen while our own panel
         // covers the browser's player controls.
-        fun isControlPanelOpen(): Boolean = currentInstance?.controlPanel != null
+        fun isControlPanelOpen(): Boolean = currentInstance?.controlPanel?.isShown == true
 
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
