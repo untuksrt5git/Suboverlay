@@ -46,6 +46,8 @@ class SubtitleOverlayService : Service() {
     private var subtitleTextSizeSp = 19f
     private var overlayBackgroundAlpha = 204
     private var dragMode = false
+    // Pause Accessibility/OCR while the Android document picker covers the browser.
+    private var pickerOpen = false
     private var dragStartRawX = 0f
     private var dragStartRawY = 0f
     private var dragStartX = 0
@@ -235,6 +237,7 @@ class SubtitleOverlayService : Service() {
             controlPanel = null
             controlHandle?.visibility = android.view.View.GONE
             controlHandle?.text = "⚙"
+            pickerOpen = true
             try {
                 val picker = Intent(this, SubtitlePickerActivity::class.java).apply {
                     // Keep the picker in its own temporary task. Finishing it then
@@ -243,6 +246,7 @@ class SubtitleOverlayService : Service() {
                 }
                 startActivity(picker)
             } catch (_: Exception) {
+                pickerOpen = false
                 controlHandle?.visibility = android.view.View.VISIBLE
                 android.widget.Toast.makeText(this, "Tidak dapat membuka pemilih file", android.widget.Toast.LENGTH_SHORT).show()
             }
@@ -455,12 +459,16 @@ class SubtitleOverlayService : Service() {
         @Volatile private var currentInstance: SubtitleOverlayService? = null
 
         fun restorePickerControls() {
-            currentInstance?.controlHandle?.visibility = android.view.View.VISIBLE
+            currentInstance?.let { service ->
+                service.pickerOpen = false
+                service.controlHandle?.visibility = android.view.View.VISIBLE
+            }
         }
 
-        // Accessibility OCR must not inspect the screen while our own panel
-        // covers the browser's player controls.
-        fun isControlPanelOpen(): Boolean = currentInstance?.controlPanel?.isShown == true
+        // Do not inspect a screen covered by our panel or the system file picker.
+        fun shouldPauseAccessibilityScan(): Boolean = currentInstance?.let { service ->
+            service.pickerOpen || service.controlPanel?.isShown == true
+        } == true
 
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
