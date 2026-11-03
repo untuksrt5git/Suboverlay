@@ -9,6 +9,8 @@
         android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".SubtitlePickerActivity"
             android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="id.suboverlay.subtitlepicker"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
