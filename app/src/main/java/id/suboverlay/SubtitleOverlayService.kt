@@ -219,11 +219,23 @@ class SubtitleOverlayService : Service() {
         controlHandle = handle
     }
 
+    private fun removeControlPanel() {
+        val panel = controlPanel
+        if (panel != null) {
+            // syncStatusView is reused on every panel opening. Detach it first;
+            // otherwise the next addView() crashes because it still has a parent.
+            syncStatusView?.let { status ->
+                (status.parent as? android.view.ViewGroup)?.removeView(status)
+            }
+            try { windowManager.removeView(panel) } catch (_: Exception) { }
+        }
+        controlPanel = null
+        controlHandle?.text = "⚙"
+    }
+
     private fun toggleControlPanel() {
-        controlPanel?.let {
-            try { windowManager.removeView(it) } catch (_: Exception) { }
-            controlPanel = null
-            controlHandle?.text = "⚙"
+        if (controlPanel != null) {
+            removeControlPanel()
             return
         }
         fun row(): LinearLayout = LinearLayout(this).apply {
@@ -259,10 +271,8 @@ class SubtitleOverlayService : Service() {
         addControl(actions, "Ganti subtitle") {
             // Remove overlay controls before opening the system picker so they cannot
             // cover its window on devices that keep application overlays on top.
-            controlPanel?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
-            controlPanel = null
+            removeControlPanel()
             controlHandle?.visibility = android.view.View.GONE
-            controlHandle?.text = "⚙"
             pickerOpen = true
             try {
                 val picker = Intent(this, SubtitlePickerActivity::class.java).apply {
@@ -447,8 +457,7 @@ class SubtitleOverlayService : Service() {
     }
 
     private fun stopOverlay() {
-        controlPanel?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
-        controlPanel = null
+        removeControlPanel()
         controlHandle?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
         controlHandle = null
         overlay?.let { try { windowManager.removeView(it) } catch (_: Exception) { } }
