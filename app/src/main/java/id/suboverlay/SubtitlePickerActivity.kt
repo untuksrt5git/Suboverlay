@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.provider.OpenableColumns
 import android.widget.Toast
 import java.io.File
@@ -15,14 +17,21 @@ import java.io.File
  * never stopped while a replacement subtitle is selected.
  */
 class SubtitlePickerActivity : Activity() {
+    private var pickerActivityStartedAtMs = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pickerActivityStartedAtMs = SystemClock.elapsedRealtime()
+        Log.i(DIAGNOSTIC_TAG, "Picker activity created; requesting Android file picker")
         try {
+            val launchStartedAtMs = SystemClock.elapsedRealtime()
             startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
             }, REQUEST_PICK)
+            Log.i(DIAGNOSTIC_TAG, "startActivityForResult returned in ${SystemClock.elapsedRealtime() - launchStartedAtMs} ms")
         } catch (e: Exception) {
+            Log.e(DIAGNOSTIC_TAG, "Could not launch Android file picker", e)
             Toast.makeText(this, "Tidak dapat membuka pemilih file.", Toast.LENGTH_SHORT).show()
             finish()
         }
@@ -32,6 +41,7 @@ class SubtitlePickerActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_PICK) return
+        Log.i(DIAGNOSTIC_TAG, "Picker result received after ${SystemClock.elapsedRealtime() - pickerActivityStartedAtMs} ms; resultCode=$resultCode")
         SubtitleOverlayService.restorePickerControls()
         if (resultCode != RESULT_OK) {
             finish()
@@ -52,10 +62,12 @@ class SubtitlePickerActivity : Activity() {
             }
             val directory = File(filesDir, "subtitles").apply { mkdirs() }
             val target = File(directory, "subtitle_${System.currentTimeMillis()}.$extension")
+            val copyStartedAtMs = SystemClock.elapsedRealtime()
             contentResolver.openInputStream(source).use { input ->
                 requireNotNull(input) { "File tidak dapat dibaca" }
                 target.outputStream().use { output -> input.copyTo(output) }
             }
+            Log.i(DIAGNOSTIC_TAG, "Copied $displayName: ${target.length()} bytes in ${SystemClock.elapsedRealtime() - copyStartedAtMs} ms")
             val localUri = Uri.fromFile(target)
             getSharedPreferences("subtitle_selection", MODE_PRIVATE).edit()
                 .putString("uri", localUri.toString())
@@ -87,5 +99,8 @@ class SubtitlePickerActivity : Activity() {
         return name
     }
 
-    companion object { private const val REQUEST_PICK = 3101 }
+    companion object {
+        private const val REQUEST_PICK = 3101
+        private const val DIAGNOSTIC_TAG = "SuboverlayPicker"
+    }
 }
