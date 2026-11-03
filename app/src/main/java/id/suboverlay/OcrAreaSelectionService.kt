@@ -2,6 +2,10 @@ package id.suboverlay
 
 import android.app.Service
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -23,13 +27,44 @@ class OcrAreaSelectionService : Service() {
     private val views = mutableMapOf<String, BoxView>()
     private var controls: View? = null
     private var orientationKey = "portrait"
+    private var orientationReceiverRegistered = false
+
+    private val orientationReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != Intent.ACTION_CONFIGURATION_CHANGED || views.isEmpty()) return
+            val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val newKey = if (landscape) "landscape" else "portrait"
+            if (newKey == orientationKey) return
+
+            // Orientation profiles are independent. Discard unsaved drag positions
+            // and immediately load the saved profile for the newly active orientation.
+            orientationKey = newKey
+            val prefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
+            val elapsedDefault = if (landscape) RectF(.02f, .81f, .10f, .865f)
+                else RectF(.145f, .235f, .275f, .275f)
+            val durationDefault = if (landscape) RectF(.905f, .81f, .985f, .865f)
+                else RectF(.735f, .235f, .845f, .275f)
+            views["elapsed"]?.applyRect(load(prefs, "elapsed", elapsedDefault))
+            views["duration"]?.applyRect(load(prefs, "duration", durationDefault))
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (views.isNotEmpty()) return START_NOT_STICKY
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
-        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        if (!orientationReceiverRegistered) {
+            val filter = IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED)
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(orientationReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(orientationReceiver, filter)
+            }
+            orientationReceiverRegistered = true
+        }
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         orientationKey = if (landscape) "landscape" else "portrait"
         val prefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
         val elapsedDefault = if (landscape) RectF(.02f, .81f, .10f, .865f)
@@ -148,6 +183,10 @@ class OcrAreaSelectionService : Service() {
     }
 
     override fun onDestroy() {
+        if (orientationReceiverRegistered) {
+            try { unregisterReceiver(orientationReceiver) } catch (_: Exception) { }
+            orientationReceiverRegistered = false
+        }
         views.values.forEach { try { wm.removeView(it) } catch (_: Exception) { } }
         views.clear()
         controls?.let { try { wm.removeView(it) } catch (_: Exception) { } }
@@ -186,7 +225,7 @@ class OcrAreaSelectionService : Service() {
                 ((location[1] + height) / h).coerceIn(top + .001f, 1f)
             )
         }
-        fun reset(r: RectF) {
+        fun applyRect(r: RectF) {
             val p = layoutParams as WindowManager.LayoutParams
             val screen = fullScreenSize()
             val location = IntArray(2)
@@ -195,11 +234,15 @@ class OcrAreaSelectionService : Service() {
             val offsetY = location[1] - p.y
             p.width = (r.width() * screen.x).toInt().coerceIn(dp(44), dp(240))
             p.height = (r.height() * screen.y).toInt().coerceIn(dp(36), dp(120))
-            p.x = ((r.left * screen.x).toInt() - offsetX).coerceIn(-offsetX, screen.x - p.width - offsetX)
-            p.y = ((r.top * screen.y).toInt() - offsetY).coerceIn(-offsetY, screen.y - p.height - offsetY)
+            p.x = ((r.left * screen.x).toInt() - offsetX)
+                .coerceIn(-offsetX, screen.x - p.width - offsetX)
+            p.y = ((r.top * screen.y).toInt() - offsetY)
+                .coerceIn(-offsetY, screen.y - p.height - offsetY)
             wm.updateViewLayout(this, p)
             invalidate()
         }
+
+        fun reset(r: RectF) = applyRect(r)
         override fun onDraw(c: Canvas) {
             val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
             c.drawRoundRect(rect, dp(8).toFloat(), dp(8).toFloat(), bg)
