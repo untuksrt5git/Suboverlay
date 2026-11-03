@@ -42,7 +42,6 @@ class SubtitlePickerActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_PICK) return
         Log.i(DIAGNOSTIC_TAG, "Picker result received after ${SystemClock.elapsedRealtime() - pickerActivityStartedAtMs} ms; resultCode=$resultCode")
-        SubtitleOverlayService.restorePickerControls()
         if (resultCode != RESULT_OK) {
             returnToPreviousApp()
             return
@@ -93,6 +92,8 @@ class SubtitlePickerActivity : Activity() {
      * main task to the back; it may not be the task that launched the picker.
      */
     private fun returnToPreviousApp() {
+        // Resume OCR and restore the floating handle only after file I/O is done.
+        SubtitleOverlayService.restorePickerControls()
         finish()
     }
 
