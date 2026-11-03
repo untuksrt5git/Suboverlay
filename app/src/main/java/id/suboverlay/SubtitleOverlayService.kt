@@ -324,10 +324,12 @@ class SubtitleOverlayService : Service() {
         ).apply {
             // Keep the panel away from the calibrated OCR time boxes:
             // portrait OCR reads near the upper quarter, landscape OCR near the bottom.
-            gravity = if (isLandscape) Gravity.TOP or Gravity.END
+            // In landscape, keep the panel centered at the very top so it
+            // cannot cover the elapsed/duration OCR boxes at the lower corners.
+            gravity = if (isLandscape) Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 else Gravity.BOTTOM or Gravity.END
-            x = dp(8)
-            y = if (isLandscape) dp(150) else dp(220)
+            x = if (isLandscape) 0 else dp(8)
+            y = if (isLandscape) dp(8) else dp(220)
         }
         windowManager.addView(panel, params)
         controlPanel = panel
@@ -512,10 +514,10 @@ class SubtitleOverlayService : Service() {
 
         @Volatile private var currentInstance: SubtitleOverlayService? = null
 
-        // Do not inspect a screen covered by our panel or the system file picker.
-        fun shouldPauseAccessibilityScan(): Boolean = currentInstance?.let { service ->
-            service.pickerOpen || service.controlPanel?.isShown == true
-        } == true
+        // Pause scanning only while the system file picker covers the browser.
+        // The control panel is positioned away from the calibrated OCR time boxes,
+        // so OCR must continue while the user adjusts subtitle settings.
+        fun shouldPauseAccessibilityScan(): Boolean = currentInstance?.pickerOpen == true
 
         fun updateAccessibilityDiagnostic(message: String) {
             currentInstance?.let { it.accessibilityDiagnostic = message }
