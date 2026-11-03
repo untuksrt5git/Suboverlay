@@ -73,7 +73,8 @@ class OcrAreaSelectionService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT).apply {
             gravity = Gravity.TOP or Gravity.LEFT
             x = (r.left * screenW).toInt().coerceIn(0, (screenW - savedW).coerceAtLeast(0))
@@ -81,6 +82,21 @@ class OcrAreaSelectionService : Service() {
         }
         wm.addView(v, p)
         views[kind] = v
+        // Overlay window coordinates can start inside a system inset. Shift the window
+        // origin so normalized screen coordinates can truly reach X=0 / Y=0.
+        v.post {
+            if (v.isAttachedToWindow) {
+                val location = IntArray(2)
+                v.getLocationOnScreen(location)
+                val offsetX = location[0] - p.x
+                val offsetY = location[1] - p.y
+                p.x = (r.left * screenW).toInt() - offsetX
+                p.y = (r.top * screenH).toInt() - offsetY
+                p.x = p.x.coerceIn(-offsetX, screenW - p.width - offsetX)
+                p.y = p.y.coerceIn(-offsetY, screenH - p.height - offsetY)
+                wm.updateViewLayout(v, p)
+            }
+        }
     }
 
     private fun addControls(prefs: android.content.SharedPreferences, landscape: Boolean) {
@@ -173,10 +189,14 @@ class OcrAreaSelectionService : Service() {
         fun reset(r: RectF) {
             val p = layoutParams as WindowManager.LayoutParams
             val screen = fullScreenSize()
-            p.x = (r.left * screen.x).toInt().coerceIn(0, (screen.x - p.width).coerceAtLeast(0))
-            p.y = (r.top * screen.y).toInt().coerceIn(0, (screen.y - p.height).coerceAtLeast(0))
+            val location = IntArray(2)
+            getLocationOnScreen(location)
+            val offsetX = location[0] - p.x
+            val offsetY = location[1] - p.y
             p.width = (r.width() * screen.x).toInt().coerceIn(dp(44), dp(240))
             p.height = (r.height() * screen.y).toInt().coerceIn(dp(36), dp(120))
+            p.x = ((r.left * screen.x).toInt() - offsetX).coerceIn(-offsetX, screen.x - p.width - offsetX)
+            p.y = ((r.top * screen.y).toInt() - offsetY).coerceIn(-offsetY, screen.y - p.height - offsetY)
             wm.updateViewLayout(this, p)
             invalidate()
         }
@@ -208,8 +228,12 @@ class OcrAreaSelectionService : Service() {
                         p.height = (startHeight + dy).coerceIn(dp(36), dp(120))
                     } else {
                         val screen = fullScreenSize()
-                        p.x = (startX + dx).coerceIn(0, (screen.x - p.width).coerceAtLeast(0))
-                        p.y = (startY + dy).coerceIn(0, (screen.y - p.height).coerceAtLeast(0))
+                        val location = IntArray(2)
+                        getLocationOnScreen(location)
+                        val offsetX = location[0] - p.x
+                        val offsetY = location[1] - p.y
+                        p.x = (startX + dx).coerceIn(-offsetX, screen.x - p.width - offsetX)
+                        p.y = (startY + dy).coerceIn(-offsetY, screen.y - p.height - offsetY)
                     }
                     wm.updateViewLayout(this, p)
                     invalidate()
