@@ -4,7 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.graphics.Bitmap
+import android.graphics.Bitmap\nimport android.graphics.RectF
 import android.view.Display
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -86,36 +86,52 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         val areaKey = if (isLandscape) "landscape" else "portrait"
                         val defaultTop = if (isLandscape) LANDSCAPE_CROP_TOP_RATIO else PORTRAIT_CROP_TOP_RATIO
                         val defaultBottom = if (isLandscape) LANDSCAPE_CROP_BOTTOM_RATIO else PORTRAIT_CROP_BOTTOM_RATIO
-                        val leftRatio = areaPrefs.getFloat("${areaKey}_left", OCR_CROP_LEFT_RATIO)
-                        val rightRatio = areaPrefs.getFloat("${areaKey}_right", OCR_CROP_RIGHT_RATIO)
-                        val cropTopRatio = areaPrefs.getFloat("${areaKey}_top", defaultTop)
-                        val cropBottomRatio = areaPrefs.getFloat("${areaKey}_bottom", defaultBottom)
-                        val cropTop = (bitmap.height * cropTopRatio).toInt().coerceIn(0, bitmap.height - 1)
-                        val cropBottom = (bitmap.height * cropBottomRatio).toInt().coerceIn(cropTop + 1, bitmap.height)
-                        val cropLeft = (bitmap.width * leftRatio).toInt().coerceIn(0, bitmap.width - 1)
-                        val cropRight = (bitmap.width * rightRatio).toInt().coerceIn(cropLeft + 1, bitmap.width)
-                        val controlCrop = Bitmap.createBitmap(
-                            bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop
-                        )
+                        fun cropFor(kind: String, default: RectF): Bitmap {
+                            val l = areaPrefs.getFloat("${areaKey}_${kind}_left", default.left)
+                            val t = areaPrefs.getFloat("${areaKey}_${kind}_top", default.top)
+                            val r = areaPrefs.getFloat("${areaKey}_${kind}_right", default.right)
+                            val b = areaPrefs.getFloat("${areaKey}_${kind}_bottom", default.bottom)
+                            val x1 = (bitmap.width * l).toInt().coerceIn(0, bitmap.width - 1)
+                            val y1 = (bitmap.height * t).toInt().coerceIn(0, bitmap.height - 1)
+                            val x2 = (bitmap.width * r).toInt().coerceIn(x1 + 1, bitmap.width)
+                            val y2 = (bitmap.height * b).toInt().coerceIn(y1 + 1, bitmap.height)
+                            return Bitmap.createBitmap(bitmap, x1, y1, x2 - x1, y2 - y1)
+                        }
+                        val defaultTop = if (isLandscape) .84f else .70f
+                        val defaultBottom = if (isLandscape) .94f else .77f
+                        val elapsedCrop = cropFor("elapsed", RectF(.025f, defaultTop, .20f, defaultBottom))
+                        val durationCrop = cropFor("duration", RectF(.79f, defaultTop, .98f, defaultBottom))
                         bitmap.recycle()
 
-                        textRecognizer.process(InputImage.fromBitmap(controlCrop, 0))
-                            .addOnSuccessListener(screenshotExecutor) { visionText ->
-                                val times = visionText.textBlocks.flatMap { block ->
-                                    block.lines.mapNotNull { line -> parseVideoTime(line.text) }
-                                }.distinct()
-                                val duration = times.filter { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }.maxOrNull()
-                                val elapsed = duration?.let { total ->
-                                    // The crop excludes page titles, ads, and unrelated timestamps.
-                                    times.filter { it < total && total - it >= MIN_DURATION_GAP_MS }.maxOrNull()
-                                }
-                                if (duration != null && elapsed != null) {
-                                    recordPosition(elapsed, screenshotCapturedAt)
-                                    SubtitleOverlayService.updateAccessibilityDiagnostic(
-                                        "OCR ${orientationLabel()} · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
-                                    )
-                                }
-                                controlCrop.recycle()
+                        textRecognizer.process(InputImage.fromBitmap(elapsedCrop, 0))
+                            .addOnSuccessListener(screenshotExecutor) { elapsedText ->
+                                textRecognizer.process(InputImage.fromBitmap(durationCrop, 0))
+                                    .addOnSuccessListener(screenshotExecutor) { durationText ->
+                                        val elapsed = elapsedText.textBlocks.flatMap { block ->
+                                            block.lines.mapNotNull { line -> parseVideoTime(line.text) }
+                                        }.filter { it < MIN_VIDEO_DURATION_MS }.maxOrNull()
+                                        val duration = durationText.textBlocks.flatMap { block ->
+                                            block.lines.mapNotNull { line -> parseVideoTime(line.text) }
+                                        }.filter { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }.maxOrNull()
+                                        if (elapsed != null && duration != null && elapsed < duration) {
+                                            recordPosition(elapsed, screenshotCapturedAt)
+                                            SubtitleOverlayService.updateAccessibilityDiagnostic(
+                                                "OCR ${orientationLabel()} · posisi: ${elapsed / 1000}s / ${duration / 1000}s"
+                                            )
+                                        } else {
+                                            SubtitleOverlayService.updateAccessibilityDiagnostic("OCR: salah satu kotak waktu belum terbaca")
+                                        }
+                                        elapsedCrop.recycle()
+                                        durationCrop.recycle()
+                                        screenshotInProgress = false
+                                    }
+                                    .addOnFailureListener(screenshotExecutor) {
+                                        elapsedCrop.recycle(); durationCrop.recycle()
+                                        screenshotInProgress = false
+                                    }
+                            }
+                            .addOnFailureListener(screenshotExecutor) {
+                                elapsedCrop.recycle(); durationCrop.recycle()
                                 screenshotInProgress = false
                             }
                             .addOnFailureListener(screenshotExecutor) {
