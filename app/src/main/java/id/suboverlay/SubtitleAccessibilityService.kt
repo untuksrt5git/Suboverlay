@@ -86,20 +86,24 @@ class SubtitleAccessibilityService : AccessibilityService() {
                         val areaPrefs = getSharedPreferences("ocr_area_settings", MODE_PRIVATE)
                         val areaKey = if (isLandscape) "landscape" else "portrait"
                         fun cropFor(kind: String, default: RectF): Bitmap {
-                            val l = areaPrefs.getFloat("${areaKey}_${kind}_left", default.left)
-                            val t = areaPrefs.getFloat("${areaKey}_${kind}_top", default.top)
-                            val r = areaPrefs.getFloat("${areaKey}_${kind}_right", default.right)
-                            val b = areaPrefs.getFloat("${areaKey}_${kind}_bottom", default.bottom)
+                            val l = areaPrefs.getFloat("${areaKey}_${kind}_v2_left", default.left)
+                            val t = areaPrefs.getFloat("${areaKey}_${kind}_v2_top", default.top)
+                            val r = areaPrefs.getFloat("${areaKey}_${kind}_v2_right", default.right)
+                            val b = areaPrefs.getFloat("${areaKey}_${kind}_v2_bottom", default.bottom)
                             val x1 = (bitmap.width * l).toInt().coerceIn(0, bitmap.width - 1)
                             val y1 = (bitmap.height * t).toInt().coerceIn(0, bitmap.height - 1)
                             val x2 = (bitmap.width * r).toInt().coerceIn(x1 + 1, bitmap.width)
                             val y2 = (bitmap.height * b).toInt().coerceIn(y1 + 1, bitmap.height)
                             return Bitmap.createBitmap(bitmap, x1, y1, x2 - x1, y2 - y1)
                         }
-                        val defaultTop = if (isLandscape) .84f else .70f
-                        val defaultBottom = if (isLandscape) .94f else .77f
-                        val elapsedCrop = cropFor("elapsed", RectF(.025f, defaultTop, .20f, defaultBottom))
-                        val durationCrop = cropFor("duration", RectF(.79f, defaultTop, .98f, defaultBottom))
+                        // Calibrated to the supplied UC Browser screenshots:
+                        // portrait is an embedded player in the page; landscape is fullscreen.
+                        val elapsedDefault = if (isLandscape) RectF(.02f, .72f, .10f, .81f)
+                            else RectF(.13f, .47f, .25f, .54f)
+                        val durationDefault = if (isLandscape) RectF(.81f, .72f, .91f, .81f)
+                            else RectF(.65f, .47f, .78f, .54f)
+                        val elapsedCrop = cropFor("elapsed", elapsedDefault)
+                        val durationCrop = cropFor("duration", durationDefault)
                         bitmap.recycle()
 
                         textRecognizer.process(InputImage.fromBitmap(elapsedCrop, 0))
@@ -108,7 +112,7 @@ class SubtitleAccessibilityService : AccessibilityService() {
                                     .addOnSuccessListener(screenshotExecutor) { durationText ->
                                         val elapsed = elapsedText.textBlocks.flatMap { block ->
                                             block.lines.mapNotNull { line -> parseVideoTime(line.text) }
-                                        }.filter { it < MIN_VIDEO_DURATION_MS }.maxOrNull()
+                                        }.filter { it in 0L..MAX_VIDEO_MS }.maxOrNull()
                                         val duration = durationText.textBlocks.flatMap { block ->
                                             block.lines.mapNotNull { line -> parseVideoTime(line.text) }
                                         }.filter { it in MIN_VIDEO_DURATION_MS..MAX_VIDEO_MS }.maxOrNull()
