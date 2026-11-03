@@ -57,7 +57,7 @@ class SubtitleOverlayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val subtitleLoader = Executors.newSingleThreadExecutor()
     private var subtitleLoadRequestId = 0L
-    private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 500) } }
+    private val syncTask = object : Runnable { override fun run() { syncFromMediaSession(); handler.postDelayed(this, 250) } }
 
     override fun onCreate() {
         super.onCreate()
